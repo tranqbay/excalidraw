@@ -1,37 +1,42 @@
 // Inspired and partly copied from https://gitlab.com/kiliandeca/excalidraw-fork
 // MIT, Kilian Decaderincourt
 
-import { getSyncableElements, SyncableExcalidrawElement } from ".";
+import type { SyncableExcalidrawElement } from ".";
+import { getSyncableElements } from ".";
 import { MIME_TYPES } from "@excalidraw/excalidraw/constants";
 import { decompressData } from "@excalidraw/excalidraw/data/encode";
-import { encryptData, IV_LENGTH_BYTES } from "@excalidraw/excalidraw/data/encryption";
+import {
+  encryptData,
+  IV_LENGTH_BYTES,
+} from "@excalidraw/excalidraw/data/encryption";
 import { restoreElements } from "@excalidraw/excalidraw/data/restore";
 import { getSceneVersion } from "@excalidraw/excalidraw/element";
-import { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types";
+import type {
+  ExcalidrawElement,
+  FileId,
+} from "@excalidraw/excalidraw/element/types";
 import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
-import {
+import type {
   AppState,
   BinaryFileData,
   BinaryFileMetadata,
   DataURL,
 } from "@excalidraw/excalidraw/types";
-import Portal from "../collab/Portal";
+import type Portal from "../collab/Portal";
 import { reconcileElements } from "@excalidraw/excalidraw";
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
 import { decryptData } from "@excalidraw/excalidraw/data/encryption";
-import { StoredScene } from "./StorageBackend";
-import {Socket} from "socket.io-client";
+import type { StoredScene } from "./StorageBackend";
+import type { Socket } from "socket.io-client";
 
-const HTTP_STORAGE_BACKEND_URL = process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
+const HTTP_STORAGE_BACKEND_URL = import.meta.env
+  .VITE_APP_HTTP_STORAGE_BACKEND_URL;
 const SCENE_VERSION_LENGTH_BYTES = 4;
 
 // There is a lot of intentional duplication with the firebase file
 // to prevent modifying upstream files and ease futur maintenance of this fork
 
-const httpStorageSceneVersionCache = new WeakMap<
-  Socket,
-  number
->();
+const httpStorageSceneVersionCache = new WeakMap<Socket, number>();
 
 export const isSavedToHttpStorage = (
   portal: Portal,
@@ -120,21 +125,26 @@ export const loadFromHttpStorage = async (
   roomId: string,
   roomKey: string,
   socket: Socket | null,
-): Promise<readonly ExcalidrawElement[] | null> => {
-  const HTTP_STORAGE_BACKEND_URL =
-    process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
+): Promise<readonly SyncableExcalidrawElement[] | null> => {
   const getResponse = await fetch(
     `${HTTP_STORAGE_BACKEND_URL}/rooms/${roomId}`,
   );
 
+  if (!getResponse.ok) {
+    return null;
+  }
+
   const buffer = await getResponse.arrayBuffer();
+  if (!buffer.byteLength) {
+    return null;
+  }
   const elements = await getElementsFromBuffer(buffer, roomKey);
 
   if (socket) {
     httpStorageSceneVersionCache.set(socket, getSceneVersion(elements));
   }
 
-  return restoreElements(elements, null);
+  return getSyncableElements(restoreElements(elements, null));
 };
 
 const getElementsFromBuffer = async (
@@ -170,9 +180,6 @@ export const saveFilesToHttpStorage = async ({
   const erroredFiles: FileId[] = [];
   const savedFiles: FileId[] = [];
 
-  const HTTP_STORAGE_BACKEND_URL =
-    process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
-
   // prevent unused param warning
   void prefix;
   await Promise.all(
@@ -205,11 +212,9 @@ export const loadFilesFromHttpStorage = async (
   //////////////
   await Promise.all(
     [...new Set(filesIds)].map(async (id) => {
-  // prevent unused param warning
-  void prefix;
+      // prevent unused param warning
+      void prefix;
       try {
-        const HTTP_STORAGE_BACKEND_URL =
-          process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
         const response = await fetch(`${HTTP_STORAGE_BACKEND_URL}/files/${id}`);
         if (response.status < 400) {
           const arrayBuffer = await response.arrayBuffer();
@@ -241,6 +246,11 @@ export const loadFilesFromHttpStorage = async (
   //////
 
   return { loadedFiles, erroredFiles };
+};
+
+export const saveSceneForMigration = async () => {
+  // http storage doesn't support this
+  console.error("Saving scene for migration is not supported in httpStorage");
 };
 
 const saveElementsToBackend = async (

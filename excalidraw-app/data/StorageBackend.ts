@@ -1,7 +1,10 @@
-import { SyncableExcalidrawElement } from ".";
-import { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types";
-import { AppState, BinaryFileData } from "@excalidraw/excalidraw/types";
-import Portal from "../collab/Portal";
+import type { SyncableExcalidrawElement } from ".";
+import type {
+  ExcalidrawElement,
+  FileId,
+} from "@excalidraw/excalidraw/element/types";
+import type { AppState, BinaryFileData } from "@excalidraw/excalidraw/types";
+import type Portal from "../collab/Portal";
 import type { Socket } from "socket.io-client";
 
 export interface StorageBackend {
@@ -15,8 +18,8 @@ export interface StorageBackend {
     roomId: string,
     roomKey: string,
     socket: Socket | null,
-  ) => Promise<readonly ExcalidrawElement[] | null>;
-  saveFilesToStorageBackend: ({ 
+  ) => Promise<readonly SyncableExcalidrawElement[] | null>;
+  saveFilesToStorageBackend: ({
     prefix,
     files,
   }: {
@@ -34,6 +37,11 @@ export interface StorageBackend {
     loadedFiles: BinaryFileData[];
     erroredFiles: Map<FileId, true>;
   }>;
+  saveSceneForMigration: (
+    id: string,
+    name: string,
+    data: Blob,
+  ) => Promise<void>;
 }
 
 export interface StoredScene {

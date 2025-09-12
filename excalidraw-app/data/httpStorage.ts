@@ -2,22 +2,25 @@
 // MIT, Kilian Decaderincourt
 
 import { getSyncableElements, SyncableExcalidrawElement } from ".";
-import { MIME_TYPES } from "../../src/constants";
-import { decompressData } from "../../src/data/encode";
-import { encryptData, IV_LENGTH_BYTES } from "../../src/data/encryption";
-import { restoreElements } from "../../src/data/restore";
-import { getSceneVersion } from "../../src/element";
-import { ExcalidrawElement, FileId } from "../../src/element/types";
+import { MIME_TYPES } from "@excalidraw/excalidraw/constants";
+import { decompressData } from "@excalidraw/excalidraw/data/encode";
+import { encryptData, IV_LENGTH_BYTES } from "@excalidraw/excalidraw/data/encryption";
+import { restoreElements } from "@excalidraw/excalidraw/data/restore";
+import { getSceneVersion } from "@excalidraw/excalidraw/element";
+import { ExcalidrawElement, FileId } from "@excalidraw/excalidraw/element/types";
+import type { OrderedExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import {
   AppState,
   BinaryFileData,
   BinaryFileMetadata,
   DataURL,
-} from "../../src/types";
+} from "@excalidraw/excalidraw/types";
 import Portal from "../collab/Portal";
-import { reconcileElements } from "../collab/reconciliation";
-import { decryptData } from "../../src/data/encryption";
+import { reconcileElements } from "@excalidraw/excalidraw";
+import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
+import { decryptData } from "@excalidraw/excalidraw/data/encryption";
 import { StoredScene } from "./StorageBackend";
+import {Socket} from "socket.io-client";
 
 const HTTP_STORAGE_BACKEND_URL = process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
 const SCENE_VERSION_LENGTH_BYTES = 4;
@@ -26,7 +29,7 @@ const SCENE_VERSION_LENGTH_BYTES = 4;
 // to prevent modifying upstream files and ease futur maintenance of this fork
 
 const httpStorageSceneVersionCache = new WeakMap<
-  SocketIOClient.Socket,
+  Socket,
   number
 >();
 
@@ -77,9 +80,8 @@ export const saveToHttpStorage = async (
       sceneVersion,
     );
     if (result) {
-      return {
-        reconciledElements: null,
-      };
+      httpStorageSceneVersionCache.set(socket, sceneVersion);
+      return elements; // saved new room, return elements as stored
     }
     return false;
   }
@@ -93,7 +95,11 @@ export const saveToHttpStorage = async (
 
   const existingElements = await getElementsFromBuffer(buffer, roomKey);
   const reconciledElements = getSyncableElements(
-    reconcileElements(elements, existingElements, appState),
+    reconcileElements(
+      elements,
+      existingElements as OrderedExcalidrawElement[] as RemoteExcalidrawElement[],
+      appState,
+    ),
   );
 
   const result: boolean = await saveElementsToBackend(
@@ -105,9 +111,7 @@ export const saveToHttpStorage = async (
 
   if (result) {
     httpStorageSceneVersionCache.set(socket, sceneVersion);
-    return {
-      reconciledElements: elements,
-    };
+    return reconciledElements as readonly ExcalidrawElement[];
   }
   return false;
 };
@@ -115,7 +119,7 @@ export const saveToHttpStorage = async (
 export const loadFromHttpStorage = async (
   roomId: string,
   roomKey: string,
-  socket: SocketIOClient.Socket | null,
+  socket: Socket | null,
 ): Promise<readonly ExcalidrawElement[] | null> => {
   const HTTP_STORAGE_BACKEND_URL =
     process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
@@ -163,12 +167,14 @@ export const saveFilesToHttpStorage = async ({
   prefix: string;
   files: { id: FileId; buffer: Uint8Array }[];
 }) => {
-  const erroredFiles = new Map<FileId, true>();
-  const savedFiles = new Map<FileId, true>();
+  const erroredFiles: FileId[] = [];
+  const savedFiles: FileId[] = [];
 
   const HTTP_STORAGE_BACKEND_URL =
     process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;
 
+  // prevent unused param warning
+  void prefix;
   await Promise.all(
     files.map(async ({ id, buffer }) => {
       try {
@@ -178,9 +184,9 @@ export const saveFilesToHttpStorage = async ({
           method: "PUT",
           body: payload,
         });
-        savedFiles.set(id, true);
+        savedFiles.push(id);
       } catch (error: any) {
-        erroredFiles.set(id, true);
+        erroredFiles.push(id);
       }
     }),
   );
@@ -199,6 +205,8 @@ export const loadFilesFromHttpStorage = async (
   //////////////
   await Promise.all(
     [...new Set(filesIds)].map(async (id) => {
+  // prevent unused param warning
+  void prefix;
       try {
         const HTTP_STORAGE_BACKEND_URL =
           process.env.REACT_APP_HTTP_STORAGE_BACKEND_URL;

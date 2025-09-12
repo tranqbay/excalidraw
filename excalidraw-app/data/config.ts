@@ -16,9 +16,26 @@ import { StorageBackend } from "./StorageBackend";
 
 const firebaseStorage: StorageBackend = {
   isSaved: isSavedToFirebase,
-  saveToStorageBackend: saveToFirebase,
+  saveToStorageBackend: async (portal, elements, appState) => {
+    // saveToFirebase returns either null or stored elements array; adapt to interface
+    const res = await saveToFirebase(portal, elements, appState);
+    if (!res) {
+      return false;
+    }
+    return { reconciledElements: res };
+  },
   loadFromStorageBackend: loadFromFirebase,
-  saveFilesToStorageBackend: saveFilesToFirebase,
+  saveFilesToStorageBackend: async ({ prefix, files }) => {
+    // saveFilesToFirebase returns arrays; convert to Maps per interface
+    const { savedFiles, erroredFiles } = await saveFilesToFirebase({
+      prefix,
+      files,
+    });
+    return {
+      savedFiles: new Map(savedFiles.map((id) => [id, true] as const)),
+      erroredFiles: new Map(erroredFiles.map((id) => [id, true] as const)),
+    };
+  },
   loadFilesFromStorageBackend: loadFilesFromFirebase,
 };
 

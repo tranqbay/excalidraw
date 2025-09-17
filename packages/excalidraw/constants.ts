@@ -151,7 +151,11 @@ export const getFontFamilyFallbacks = (
 ): Array<keyof typeof FONT_FAMILY_FALLBACKS> => {
   switch (fontFamily) {
     case FONT_FAMILY.Excalifont:
-      return [CJK_HAND_DRAWN_FALLBACK_FONT, CJK_HAND_DRAWN_FALLBACK_2_FONT, WINDOWS_EMOJI_FALLBACK_FONT];
+      return [
+        CJK_HAND_DRAWN_FALLBACK_FONT,
+        CJK_HAND_DRAWN_FALLBACK_2_FONT,
+        WINDOWS_EMOJI_FALLBACK_FONT,
+      ];
     default:
       return [WINDOWS_EMOJI_FALLBACK_FONT];
   }

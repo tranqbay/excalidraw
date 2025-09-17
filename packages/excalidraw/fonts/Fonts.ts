@@ -1,37 +1,35 @@
 import {
+  CJK_HAND_DRAWN_FALLBACK_2_FONT,
+  CJK_HAND_DRAWN_FALLBACK_FONT,
   FONT_FAMILY,
   FONT_FAMILY_FALLBACKS,
-  CJK_HAND_DRAWN_FALLBACK_FONT,
-  WINDOWS_EMOJI_FALLBACK_FONT,
   getFontFamilyFallbacks,
+  WINDOWS_EMOJI_FALLBACK_FONT,
 } from "../constants";
-import { isTextElement } from "../element";
-import { getContainerElement } from "../element/textElement";
-import { containsCJK } from "../element/textWrapping";
-import { ShapeCache } from "../scene/ShapeCache";
-import { getFontString, PromisePool, promiseTry } from "../utils";
-import { ExcalidrawFontFace } from "./ExcalidrawFontFace";
+import {isTextElement} from "../element";
+import {getContainerElement} from "../element/textElement";
+import {containsCJK} from "../element/textWrapping";
+import {ShapeCache} from "../scene/ShapeCache";
+import {getFontString, PromisePool, promiseTry} from "../utils";
+import {ExcalidrawFontFace} from "./ExcalidrawFontFace";
 
-import { CascadiaFontFaces } from "./Cascadia";
-import { ComicShannsFontFaces } from "./ComicShanns";
-import { EmojiFontFaces } from "./Emoji";
-import { ExcalifontFontFaces } from "./Excalifont";
-import { HelveticaFontFaces } from "./Helvetica";
-import { LiberationFontFaces } from "./Liberation";
-import { LilitaFontFaces } from "./Lilita";
-import { NunitoFontFaces } from "./Nunito";
-import { VirgilFontFaces } from "./Virgil";
-import { XiaolaiFontFaces } from "./Xiaolai";
+import {CascadiaFontFaces} from "./Cascadia";
+import {ComicShannsFontFaces} from "./ComicShanns";
+import {EmojiFontFaces} from "./Emoji";
+import {ExcalifontFontFaces} from "./Excalifont";
+import {HelveticaFontFaces} from "./Helvetica";
+import {HanziPenSCFontFaces} from "./HanziPenSC";
+import {LiberationFontFaces} from "./Liberation";
+import {LilitaFontFaces} from "./Lilita";
+import {NunitoFontFaces} from "./Nunito";
+import {VirgilFontFaces} from "./Virgil";
+import {XiaolaiFontFaces} from "./Xiaolai";
 
-import { FONT_METADATA, type FontMetadata } from "./FontMetadata";
-import type {
-  ExcalidrawElement,
-  ExcalidrawTextElement,
-  FontFamilyValues,
-} from "../element/types";
+import {FONT_METADATA, type FontMetadata} from "./FontMetadata";
+import type {ExcalidrawElement, ExcalidrawTextElement, FontFamilyValues,} from "../element/types";
 import type Scene from "../scene/Scene";
-import type { ValueOf } from "../utility-types";
-import { charWidth } from "../element/textMeasurements";
+import type {ValueOf} from "../utility-types";
+import {charWidth} from "../element/textMeasurements";
 
 export class Fonts {
   // it's ok to track fonts across multiple instances only once, so let's use
@@ -384,7 +382,8 @@ export class Fonts {
     init("Virgil", ...VirgilFontFaces);
 
     // fallback font faces
-    init(CJK_HAND_DRAWN_FALLBACK_FONT, ...XiaolaiFontFaces);
+    init(CJK_HAND_DRAWN_FALLBACK_FONT, ...HanziPenSCFontFaces);
+    init(CJK_HAND_DRAWN_FALLBACK_2_FONT, ...XiaolaiFontFaces);
     init(WINDOWS_EMOJI_FALLBACK_FONT, ...EmojiFontFaces);
 
     Fonts._initialized = true;

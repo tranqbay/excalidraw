@@ -92,6 +92,14 @@ export const FONT_METADATA: Record<number, FontMetadata> = {
     deprecated: true,
     local: true,
   },
+  [FONT_FAMILY["HanziPen SC"]]: {
+    metrics: {
+      unitsPerEm: 1000,
+      ascender: 880,
+      descender: -144,
+      lineHeight: 1.15,
+    },
+  },
   [FONT_FAMILY.Cascadia]: {
     metrics: {
       unitsPerEm: 2048,

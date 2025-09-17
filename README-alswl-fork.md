@@ -4,7 +4,7 @@ Using this fork to add some features that I need.
 
 - [x] Self-host backend
 - [x] Better Dockernized
-- [x] Chinese font support (after v0.18.0, using official way to load font `xiaolai`)
+- [x] Chinese font support (after v0.18.0, using `HanziPen SC` first, then using official `Xiaolai`)
 
 more description in [Self hosted online collaborative drawing platform Excalidraw | Log4D](https://en.blog.alswl.com/2022/10/self-hosted-excalidraw/) and [私有化在线协同画图平台 Excalidraw | Log4D](https://blog.alswl.com/2022/10/self-hosted-excalidraw/)
 
@@ -27,8 +27,9 @@ $(upstream-version)-fork: # released tag
 
 Long live features branch (since v0.18.0):
 
-- feat/http-backend
 - feat/env-dynamic-in-docker-container
+- feat/http-backend
+- feat/hanzipen-1-xiaolai-2
 - feat/fork-docs
 
 Archived:

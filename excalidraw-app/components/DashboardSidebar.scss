@@ -31,6 +31,23 @@
     }
   }
 
+  .dashboard-new-btn {
+    background: var(--color-primary);
+    color: white;
+    border: none;
+    border-radius: var(--border-radius-md, 0.5rem);
+    padding: 0.25rem 0.625rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: opacity 0.15s ease;
+
+    &:hover {
+      opacity: 0.85;
+    }
+  }
+
   // Search
   .dashboard-search {
     padding: 0 0.75rem;

@@ -125,7 +125,10 @@ function DiagramCard({
   );
 }
 
-function useLoadDiagram(excalidrawAPI: ExcalidrawImperativeAPI) {
+function useLoadDiagram(
+  excalidrawAPI: ExcalidrawImperativeAPI,
+  dashboardDiagramIdRef?: React.MutableRefObject<string | null>,
+) {
   return useCallback(
     async (diagram: DiagramSummary) => {
       try {
@@ -138,6 +141,10 @@ function useLoadDiagram(excalidrawAPI: ExcalidrawImperativeAPI) {
           null,
           { repairBindings: true },
         );
+        // Update the diagram ID ref so auto-save updates this diagram
+        if (dashboardDiagramIdRef) {
+          dashboardDiagramIdRef.current = diagram.id;
+        }
         excalidrawAPI.updateScene({
           elements: restored.elements,
           appState: {
@@ -150,7 +157,7 @@ function useLoadDiagram(excalidrawAPI: ExcalidrawImperativeAPI) {
         console.error("Failed to load diagram:", err);
       }
     },
-    [excalidrawAPI],
+    [excalidrawAPI, dashboardDiagramIdRef],
   );
 }
 
@@ -159,6 +166,9 @@ function useDeleteDiagram(
 ) {
   return useCallback(
     async (id: string) => {
+      if (!window.confirm("Delete this diagram? This cannot be undone.")) {
+        return;
+      }
       try {
         await deleteDiagram(id);
         setDiagrams((prev) => prev.filter((d) => d.id !== id));
@@ -172,8 +182,10 @@ function useDeleteDiagram(
 
 function AllDiagramsTab({
   excalidrawAPI,
+  dashboardDiagramIdRef,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
+  dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
 }) {
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -214,7 +226,7 @@ function AllDiagramsTab({
     [fetchDiagrams, searchTimeout],
   );
 
-  const handleLoad = useLoadDiagram(excalidrawAPI);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   return (
@@ -253,8 +265,10 @@ function AllDiagramsTab({
 
 function ProjectsTab({
   excalidrawAPI,
+  dashboardDiagramIdRef,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
+  dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
 }) {
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -278,7 +292,7 @@ function ProjectsTab({
     }
   }, [selectedProject]);
 
-  const handleLoad = useLoadDiagram(excalidrawAPI);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   if (!selectedProject) {
@@ -338,17 +352,36 @@ function ProjectsTab({
 
 export const DashboardSidebar: React.FC<{
   excalidrawAPI: ExcalidrawImperativeAPI;
-}> = ({ excalidrawAPI }) => {
+  dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
+}> = ({ excalidrawAPI, dashboardDiagramIdRef }) => {
   // Only render if dashboard API URL is configured
   if (!import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     return null;
   }
+
+  const handleNewDiagram = () => {
+    if (dashboardDiagramIdRef) {
+      dashboardDiagramIdRef.current = `web-${crypto.randomUUID()}`;
+    }
+    excalidrawAPI.updateScene({
+      elements: [],
+      appState: { name: "" },
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+  };
 
   return (
     <Sidebar name={DASHBOARD_SIDEBAR_NAME}>
       <Sidebar.Tabs>
         <Sidebar.Header>
           <span className="dashboard-sidebar-title">My Diagrams</span>
+          <button
+            className="dashboard-new-btn"
+            onClick={handleNewDiagram}
+            title="New diagram"
+          >
+            + New
+          </button>
           <Sidebar.TabTriggers>
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_ALL}>
               All
@@ -359,10 +392,16 @@ export const DashboardSidebar: React.FC<{
           </Sidebar.TabTriggers>
         </Sidebar.Header>
         <Sidebar.Tab tab={DASHBOARD_TAB_ALL}>
-          <AllDiagramsTab excalidrawAPI={excalidrawAPI} />
+          <AllDiagramsTab
+            excalidrawAPI={excalidrawAPI}
+            dashboardDiagramIdRef={dashboardDiagramIdRef}
+          />
         </Sidebar.Tab>
         <Sidebar.Tab tab={DASHBOARD_TAB_PROJECTS}>
-          <ProjectsTab excalidrawAPI={excalidrawAPI} />
+          <ProjectsTab
+            excalidrawAPI={excalidrawAPI}
+            dashboardDiagramIdRef={dashboardDiagramIdRef}
+          />
         </Sidebar.Tab>
       </Sidebar.Tabs>
     </Sidebar>

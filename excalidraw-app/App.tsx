@@ -365,6 +365,11 @@ const ExcalidrawWrapper = () => {
       (elements: readonly any[], name?: string) => {
         const id = dashboardDiagramIdRef.current;
         if (!id || !import.meta.env.VITE_APP_DASHBOARD_API_URL) return;
+        // Skip saving empty canvases (no visible elements)
+        const visibleElements = elements.filter(
+          (el: any) => !el.isDeleted && el.type !== "cameraUpdate",
+        );
+        if (visibleElements.length === 0) return;
         saveDiagram(id, elements, { title: name }).catch((err) =>
           console.warn("Dashboard auto-save failed:", err),
         );
@@ -953,7 +958,10 @@ const ExcalidrawWrapper = () => {
           <Collab excalidrawAPI={excalidrawAPI} />
         )}
         {excalidrawAPI && (
-          <DashboardSidebar excalidrawAPI={excalidrawAPI} />
+          <DashboardSidebar
+            excalidrawAPI={excalidrawAPI}
+            dashboardDiagramIdRef={dashboardDiagramIdRef}
+          />
         )}
 
         <ShareDialog

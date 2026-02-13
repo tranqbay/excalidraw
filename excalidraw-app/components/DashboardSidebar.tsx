@@ -1,15 +1,20 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { Sidebar } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { restore } from "@excalidraw/excalidraw/data/restore";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
-import type { DiagramSummary } from "../data/dashboard";
+import type { DiagramSummary, ProjectSummary, ProjectMetadata } from "../data/dashboard";
 import {
   listDiagrams,
   searchDiagrams,
   listProjects,
   loadDiagramElements,
   deleteDiagram,
+  updateDiagramMeta,
+  createProject,
+  updateProject,
+  renameProject,
+  deleteProject,
 } from "../data/dashboard";
 
 import "./DashboardSidebar.scss";
@@ -36,16 +41,75 @@ function DiagramCard({
   diagram,
   onLoad,
   onDelete,
+  onRename,
+  onSetProject,
+  currentDiagramId,
 }: {
   diagram: DiagramSummary;
   onLoad: (diagram: DiagramSummary) => Promise<void>;
   onDelete: (id: string) => void;
+  onRename: (id: string, title: string) => Promise<void>;
+  onSetProject: (id: string, project: string) => Promise<void>;
+  currentDiagramId: string | null;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isRenaming, setIsRenaming] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [showProjectInput, setShowProjectInput] = useState(false);
+  const [projectValue, setProjectValue] = useState("");
+  const [projectSuggestions, setProjectSuggestions] = useState<string[]>([]);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
+  const projectInputRef = useRef<HTMLInputElement>(null);
+  const renameSubmittedRef = useRef(false);
+  const projectSubmittedRef = useRef(false);
+
+  const isCurrent = diagram.id === currentDiagramId;
+
+  // Close menu on outside click or Escape
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        menuBtnRef.current && !menuBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowMenu(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowMenu(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showMenu]);
+
+  // Auto-focus rename input
+  useEffect(() => {
+    if (isRenaming && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [isRenaming]);
+
+  // Auto-focus project input and fetch suggestions
+  useEffect(() => {
+    if (showProjectInput) {
+      projectInputRef.current?.focus();
+      listProjects()
+        .then((projects) => setProjectSuggestions(projects.map((p) => p.name)))
+        .catch(() => {});
+    }
+  }, [showProjectInput]);
 
   const handleClick = async () => {
-    if (loading) return;
+    if (loading || isRenaming || showProjectInput) return;
     setLoading(true);
     try {
       await onLoad(diagram);
@@ -54,16 +118,59 @@ function DiagramCard({
     }
   };
 
+  const handleRenameSubmit = async () => {
+    if (renameSubmittedRef.current) return;
+    renameSubmittedRef.current = true;
+    const trimmed = renameValue.trim();
+    if (trimmed && trimmed !== (diagram.title || "")) {
+      await onRename(diagram.id, trimmed);
+    }
+    setIsRenaming(false);
+    renameSubmittedRef.current = false;
+  };
+
+  const handleProjectSubmit = async () => {
+    if (projectSubmittedRef.current) return;
+    projectSubmittedRef.current = true;
+    const trimmed = projectValue.trim();
+    if (trimmed) {
+      await onSetProject(diagram.id, trimmed);
+    }
+    setShowProjectInput(false);
+    setProjectValue("");
+    projectSubmittedRef.current = false;
+  };
+
+  const cardClass = [
+    "dashboard-diagram-card",
+    loading && "dashboard-diagram-card--loading",
+    isCurrent && "dashboard-diagram-card--current",
+  ].filter(Boolean).join(" ");
+
   return (
-    <div
-      className={`dashboard-diagram-card${loading ? " dashboard-diagram-card--loading" : ""}`}
-      onClick={handleClick}
-    >
+    <div className={cardClass} onClick={handleClick}>
       <div className="dashboard-diagram-card__header">
-        <span className="dashboard-diagram-card__title">
-          {diagram.title || "Untitled"}
-        </span>
+        {isRenaming ? (
+          <input
+            ref={renameInputRef}
+            className="dashboard-diagram-card__rename-input"
+            value={renameValue}
+            onChange={(e) => setRenameValue(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") handleRenameSubmit();
+              if (e.key === "Escape") setIsRenaming(false);
+            }}
+            onBlur={handleRenameSubmit}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <span className="dashboard-diagram-card__title">
+            {diagram.title || "Untitled"}
+          </span>
+        )}
         <button
+          ref={menuBtnRef}
           className="dashboard-diagram-card__menu-btn"
           onClick={(e) => {
             e.stopPropagation();
@@ -73,7 +180,7 @@ function DiagramCard({
           ...
         </button>
         {showMenu && (
-          <div className="dashboard-diagram-card__menu">
+          <div ref={menuRef} className="dashboard-diagram-card__menu">
             <button
               onClick={(e) => {
                 e.stopPropagation();
@@ -89,6 +196,26 @@ function DiagramCard({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                setShowMenu(false);
+                setRenameValue(diagram.title || "");
+                setIsRenaming(true);
+              }}
+            >
+              Rename
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                setProjectValue(diagram.project || "");
+                setShowProjectInput(true);
+              }}
+            >
+              Set project
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 onDelete(diagram.id);
                 setShowMenu(false);
               }}
@@ -99,6 +226,37 @@ function DiagramCard({
           </div>
         )}
       </div>
+      {showProjectInput && (
+        <div
+          className="dashboard-diagram-card__project-input-wrap"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <input
+            ref={projectInputRef}
+            className="dashboard-diagram-card__rename-input"
+            placeholder="Project name..."
+            value={projectValue}
+            onChange={(e) => setProjectValue(e.target.value)}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === "Enter") handleProjectSubmit();
+              if (e.key === "Escape") {
+                setShowProjectInput(false);
+                setProjectValue("");
+              }
+            }}
+            onBlur={handleProjectSubmit}
+            list={`project-suggestions-${diagram.id}`}
+          />
+          {projectSuggestions.length > 0 && (
+            <datalist id={`project-suggestions-${diagram.id}`}>
+              {projectSuggestions.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          )}
+        </div>
+      )}
       <div className="dashboard-diagram-card__meta">
         {diagram.project && (
           <span className="dashboard-diagram-card__project">
@@ -193,11 +351,15 @@ function AllDiagramsTab({
   dashboardDiagramIdRef,
   flushDashboardSave,
   skipNextDashboardSave,
+  currentDiagramId,
+  onDiagramLoaded,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
   skipNextDashboardSave?: () => void;
+  currentDiagramId: string | null;
+  onDiagramLoaded: (id: string) => void;
 }) {
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -238,8 +400,22 @@ function AllDiagramsTab({
     [fetchDiagrams, searchTimeout],
   );
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
+  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
+  const handleLoad = useCallback(async (diagram: DiagramSummary) => {
+    await baseHandleLoad(diagram);
+    onDiagramLoaded(diagram.id);
+  }, [baseHandleLoad, onDiagramLoaded]);
   const handleDelete = useDeleteDiagram(setDiagrams);
+
+  const handleRename = useCallback(async (id: string, title: string) => {
+    await updateDiagramMeta(id, { title });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, title } : d));
+  }, []);
+
+  const handleSetProject = useCallback(async (id: string, project: string) => {
+    await updateDiagramMeta(id, { project });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project } : d));
+  }, []);
 
   return (
     <div className="dashboard-all-tab">
@@ -268,6 +444,9 @@ function AllDiagramsTab({
             diagram={diagram}
             onLoad={handleLoad}
             onDelete={handleDelete}
+            onRename={handleRename}
+            onSetProject={handleSetProject}
+            currentDiagramId={currentDiagramId}
           />
         ))}
       </div>
@@ -275,23 +454,244 @@ function AllDiagramsTab({
   );
 }
 
+const PROJECT_COLORS = [
+  "#6554c0",
+  "#0065ff",
+  "#00875a",
+  "#ff991f",
+  "#de350b",
+  "#ff5630",
+  "#6b778c",
+];
+
+function ProjectCard({
+  project,
+  onSelect,
+  onEdit,
+  onDelete,
+}: {
+  project: ProjectSummary;
+  onSelect: (project: ProjectSummary) => void;
+  onEdit: (project: ProjectSummary) => void;
+  onDelete: (name: string) => void;
+}) {
+  const [showMenu, setShowMenu] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    if (!showMenu) return;
+    const handleMouseDown = (e: MouseEvent) => {
+      if (
+        menuRef.current && !menuRef.current.contains(e.target as Node) &&
+        menuBtnRef.current && !menuBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowMenu(false);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowMenu(false);
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [showMenu]);
+
+  return (
+    <div className="dashboard-project-card" onClick={() => onSelect(project)}>
+      <div className="dashboard-project-card__header">
+        <span
+          className="dashboard-project-card__dot"
+          style={{ background: project.color || "#6554c0" }}
+        />
+        {project.icon && (
+          <span className="dashboard-project-card__icon">{project.icon}</span>
+        )}
+        <span className="dashboard-project-card__name">{project.name}</span>
+        <button
+          ref={menuBtnRef}
+          className="dashboard-diagram-card__menu-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            setShowMenu(!showMenu);
+          }}
+        >
+          ...
+        </button>
+        {showMenu && (
+          <div ref={menuRef} className="dashboard-project-card__menu">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                onEdit(project);
+              }}
+            >
+              Edit
+            </button>
+            <button
+              className="dashboard-diagram-card__delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                onDelete(project.name);
+              }}
+            >
+              Delete
+            </button>
+          </div>
+        )}
+      </div>
+      {project.description && (
+        <div className="dashboard-project-card__desc">{project.description}</div>
+      )}
+      <div className="dashboard-project-card__meta">
+        <span>{project.diagramCount} diagram{project.diagramCount !== 1 ? "s" : ""}</span>
+        <span>{formatDate(project.updatedAt)}</span>
+      </div>
+    </div>
+  );
+}
+
+function ProjectEditForm({
+  initial,
+  onSave,
+  onCancel,
+}: {
+  initial?: ProjectSummary;
+  onSave: (data: { name: string; description?: string; color?: string; icon?: string; originalName?: string }) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [name, setName] = useState(initial?.name ?? "");
+  const [description, setDescription] = useState(initial?.description ?? "");
+  const [color, setColor] = useState(initial?.color ?? "#6554c0");
+  const [icon, setIcon] = useState(initial?.icon ?? "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const nameRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    nameRef.current?.focus();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedName = name.trim();
+    if (!trimmedName) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onSave({
+        name: trimmedName,
+        description: description.trim() || undefined,
+        color,
+        icon: icon.trim() || undefined,
+        originalName: initial?.name,
+      });
+    } catch (err: any) {
+      setError(err.message || "Failed to save project");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form className="dashboard-project-form" onSubmit={handleSubmit}>
+      <label className="dashboard-project-form__label">
+        Name
+        <input
+          ref={nameRef}
+          className="dashboard-project-form__input"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Project name"
+          required
+        />
+      </label>
+      <label className="dashboard-project-form__label">
+        Description
+        <textarea
+          className="dashboard-project-form__textarea"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="Optional description..."
+          rows={3}
+        />
+      </label>
+      <label className="dashboard-project-form__label">
+        Color
+        <div className="dashboard-project-form__color-grid">
+          {PROJECT_COLORS.map((c) => (
+            <button
+              key={c}
+              type="button"
+              className={`dashboard-project-form__color-swatch${c === color ? " dashboard-project-form__color-swatch--active" : ""}`}
+              style={{ background: c }}
+              onClick={() => setColor(c)}
+            />
+          ))}
+        </div>
+      </label>
+      <label className="dashboard-project-form__label">
+        Icon (emoji)
+        <input
+          className="dashboard-project-form__input"
+          value={icon}
+          onChange={(e) => setIcon(e.target.value)}
+          placeholder={`e.g. \u{1F4C1}`}
+        />
+      </label>
+      {error && <div className="dashboard-error" style={{ padding: "0.5rem 0" }}>{error}</div>}
+      <div className="dashboard-project-form__actions">
+        <button
+          type="button"
+          className="dashboard-project-form__cancel"
+          onClick={onCancel}
+          disabled={saving}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="dashboard-project-form__save"
+          disabled={saving || !name.trim()}
+        >
+          {saving ? "Saving..." : initial ? "Update" : "Create"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+type ProjectsView = "list" | "form" | "drilldown";
+
 function ProjectsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
   flushDashboardSave,
   skipNextDashboardSave,
+  currentDiagramId,
+  onDiagramLoaded,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
   skipNextDashboardSave?: () => void;
+  currentDiagramId: string | null;
+  onDiagramLoaded: (id: string) => void;
 }) {
-  const [projects, setProjects] = useState<string[]>([]);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectSummary[]>([]);
+  const [view, setView] = useState<ProjectsView>("list");
+  const [editingProject, setEditingProject] = useState<ProjectSummary | undefined>();
+  const [selectedProject, setSelectedProject] = useState<ProjectSummary | null>(null);
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
+  const fetchProjects = useCallback(() => {
+    setLoading(true);
     listProjects()
       .then(setProjects)
       .catch(console.error)
@@ -299,53 +699,175 @@ function ProjectsTab({
   }, []);
 
   useEffect(() => {
-    if (selectedProject) {
+    fetchProjects();
+  }, [fetchProjects]);
+
+  useEffect(() => {
+    if (selectedProject && view === "drilldown") {
       setLoading(true);
-      listDiagrams({ project: selectedProject })
+      listDiagrams({ project: selectedProject.name })
         .then(setDiagrams)
         .catch(console.error)
         .finally(() => setLoading(false));
     }
-  }, [selectedProject]);
+  }, [selectedProject, view]);
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
-  const handleDelete = useDeleteDiagram(setDiagrams);
+  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
+  const handleLoad = useCallback(async (diagram: DiagramSummary) => {
+    await baseHandleLoad(diagram);
+    onDiagramLoaded(diagram.id);
+  }, [baseHandleLoad, onDiagramLoaded]);
+  const handleDeleteDiagram = useDeleteDiagram(setDiagrams);
 
-  if (!selectedProject) {
+  const handleRename = useCallback(async (id: string, title: string) => {
+    await updateDiagramMeta(id, { title });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, title } : d));
+  }, []);
+
+  const handleSetProject = useCallback(async (id: string, project: string) => {
+    await updateDiagramMeta(id, { project });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project } : d));
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const handleSelectProject = useCallback((project: ProjectSummary) => {
+    setSelectedProject(project);
+    setView("drilldown");
+  }, []);
+
+  const handleEditProject = useCallback((project: ProjectSummary) => {
+    setEditingProject(project);
+    setView("form");
+  }, []);
+
+  const handleDeleteProject = useCallback(async (name: string) => {
+    if (!window.confirm(`Delete project "${name}"? Diagrams will be unassigned but not deleted.`)) return;
+    try {
+      await deleteProject(name);
+      setProjects((prev) => prev.filter((p) => p.name !== name));
+    } catch (err) {
+      console.error("Failed to delete project:", err);
+    }
+  }, []);
+
+  const handleSaveProject = useCallback(async (data: {
+    name: string;
+    description?: string;
+    color?: string;
+    icon?: string;
+    originalName?: string;
+  }) => {
+    const { originalName, ...meta } = data;
+    if (originalName) {
+      // Editing existing project
+      if (originalName !== meta.name) {
+        await renameProject(originalName, meta.name);
+      }
+      await updateProject(meta.name, {
+        description: meta.description,
+        color: meta.color,
+        icon: meta.icon,
+      });
+    } else {
+      await createProject(meta as ProjectMetadata);
+    }
+    setView("list");
+    setEditingProject(undefined);
+    fetchProjects();
+  }, [fetchProjects]);
+
+  // List view
+  if (view === "list") {
     return (
       <div className="dashboard-projects-tab">
+        <div className="dashboard-projects-tab__actions">
+          <button
+            className="dashboard-new-project-btn"
+            onClick={() => {
+              setEditingProject(undefined);
+              setView("form");
+            }}
+          >
+            + New Project
+          </button>
+        </div>
         {loading && (
           <div className="dashboard-empty">Loading projects...</div>
         )}
         {!loading && projects.length === 0 && (
-          <div className="dashboard-empty">No projects yet</div>
+          <div className="dashboard-empty">No projects yet. Create one to organize your diagrams.</div>
         )}
-        {projects.map((project) => (
-          <div
-            key={project}
-            className="dashboard-project-item"
-            onClick={() => setSelectedProject(project)}
-          >
-            <span className="dashboard-project-item__icon">&#128193;</span>
-            <span className="dashboard-project-item__name">{project}</span>
-          </div>
-        ))}
+        <div className="dashboard-project-list">
+          {projects.map((project) => (
+            <ProjectCard
+              key={project.name}
+              project={project}
+              onSelect={handleSelectProject}
+              onEdit={handleEditProject}
+              onDelete={handleDeleteProject}
+            />
+          ))}
+        </div>
       </div>
     );
   }
 
+  // Form view (create or edit)
+  if (view === "form") {
+    return (
+      <div className="dashboard-projects-tab">
+        <button
+          className="dashboard-back-btn"
+          onClick={() => {
+            setView("list");
+            setEditingProject(undefined);
+          }}
+        >
+          &#8592; Back to projects
+        </button>
+        <h3 className="dashboard-project-title">
+          {editingProject ? "Edit Project" : "New Project"}
+        </h3>
+        <ProjectEditForm
+          initial={editingProject}
+          onSave={handleSaveProject}
+          onCancel={() => {
+            setView("list");
+            setEditingProject(undefined);
+          }}
+        />
+      </div>
+    );
+  }
+
+  // Drill-down view
   return (
     <div className="dashboard-projects-tab">
       <button
         className="dashboard-back-btn"
         onClick={() => {
+          setView("list");
           setSelectedProject(null);
           setDiagrams([]);
         }}
       >
         &#8592; Back to projects
       </button>
-      <h3 className="dashboard-project-title">{selectedProject}</h3>
+      <div className="dashboard-project-title-row">
+        {selectedProject?.color && (
+          <span
+            className="dashboard-project-card__dot"
+            style={{ background: selectedProject.color }}
+          />
+        )}
+        <h3 className="dashboard-project-title">
+          {selectedProject?.icon ? `${selectedProject.icon} ` : ""}
+          {selectedProject?.name}
+        </h3>
+      </div>
+      {selectedProject?.description && (
+        <p className="dashboard-project-desc">{selectedProject.description}</p>
+      )}
       <div className="dashboard-diagram-list">
         {loading && (
           <div className="dashboard-empty">Loading diagrams...</div>
@@ -358,11 +880,28 @@ function ProjectsTab({
             key={diagram.id}
             diagram={diagram}
             onLoad={handleLoad}
-            onDelete={handleDelete}
+            onDelete={handleDeleteDiagram}
+            onRename={handleRename}
+            onSetProject={handleSetProject}
+            currentDiagramId={currentDiagramId}
           />
         ))}
       </div>
     </div>
+  );
+}
+
+export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error";
+
+function SaveStatusIndicator({ status }: { status: DashboardSaveStatus }) {
+  if (status === "idle") return null;
+  const className = `dashboard-save-status dashboard-save-status--${status}`;
+  return (
+    <span className={className}>
+      {status === "saving" && "Saving..."}
+      {status === "saved" && "\u2713 Saved"}
+      {status === "error" && "\u2022 Save failed"}
+    </span>
   );
 }
 
@@ -371,7 +910,16 @@ export const DashboardSidebar: React.FC<{
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
   skipNextDashboardSave?: () => void;
-}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave }) => {
+  dashboardSaveStatus?: DashboardSaveStatus;
+}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, dashboardSaveStatus = "idle" }) => {
+  const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(
+    dashboardDiagramIdRef?.current ?? null,
+  );
+
+  const handleDiagramLoaded = useCallback((id: string) => {
+    setCurrentDiagramId(id);
+  }, []);
+
   // Only render if dashboard API URL is configured
   if (!import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     return null;
@@ -384,6 +932,7 @@ export const DashboardSidebar: React.FC<{
       const newId = `web-${crypto.randomUUID()}`;
       dashboardDiagramIdRef.current = newId;
       localStorage.setItem("dashboard-diagram-id", newId);
+      setCurrentDiagramId(newId);
     }
     // Skip the auto-save triggered by updateScene (empty canvas, nothing to save)
     skipNextDashboardSave?.();
@@ -399,6 +948,7 @@ export const DashboardSidebar: React.FC<{
       <Sidebar.Tabs>
         <Sidebar.Header>
           <span className="dashboard-sidebar-title">My Diagrams</span>
+          <SaveStatusIndicator status={dashboardSaveStatus} />
           <button
             className="dashboard-new-btn"
             onClick={handleNewDiagram}
@@ -421,6 +971,8 @@ export const DashboardSidebar: React.FC<{
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={flushDashboardSave}
             skipNextDashboardSave={skipNextDashboardSave}
+            currentDiagramId={currentDiagramId}
+            onDiagramLoaded={handleDiagramLoaded}
           />
         </Sidebar.Tab>
         <Sidebar.Tab tab={DASHBOARD_TAB_PROJECTS}>
@@ -429,6 +981,8 @@ export const DashboardSidebar: React.FC<{
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={flushDashboardSave}
             skipNextDashboardSave={skipNextDashboardSave}
+            currentDiagramId={currentDiagramId}
+            onDiagramLoaded={handleDiagramLoaded}
           />
         </Sidebar.Tab>
       </Sidebar.Tabs>

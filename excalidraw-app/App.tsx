@@ -95,6 +95,7 @@ import {
   DashboardSidebar,
   DASHBOARD_SIDEBAR_NAME,
 } from "./components/DashboardSidebar";
+import type { DashboardSaveStatus } from "./components/DashboardSidebar";
 import { saveDiagram } from "./data/dashboard";
 import {
   Provider,
@@ -366,6 +367,8 @@ const ExcalidrawWrapper = () => {
       localStorage.setItem("dashboard-diagram-id", dashboardDiagramIdRef.current);
     }
   }
+  const [dashboardSaveStatus, setDashboardSaveStatus] = useState<DashboardSaveStatus>("idle");
+  const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const debouncedDashboardSave = useRef(
     debounce(
       (elements: readonly any[], name?: string) => {
@@ -376,9 +379,18 @@ const ExcalidrawWrapper = () => {
           (el: any) => !el.isDeleted && el.type !== "cameraUpdate",
         );
         if (visibleElements.length === 0) return;
-        saveDiagram(id, elements, { title: name }).catch((err) =>
-          console.warn("Dashboard auto-save failed:", err),
-        );
+        setDashboardSaveStatus("saving");
+        if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+        saveDiagram(id, elements, { title: name })
+          .then(() => {
+            setDashboardSaveStatus("saved");
+            saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 2000);
+          })
+          .catch((err) => {
+            console.warn("Dashboard auto-save failed:", err);
+            setDashboardSaveStatus("error");
+            saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
+          });
       },
       5000, // 5 second debounce for server saves
     ),
@@ -973,6 +985,7 @@ const ExcalidrawWrapper = () => {
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={() => debouncedDashboardSave.flush()}
             skipNextDashboardSave={() => { skipDashboardSaveUntilRef.current = Date.now() + 1000; }}
+            dashboardSaveStatus={dashboardSaveStatus}
           />
         )}
 

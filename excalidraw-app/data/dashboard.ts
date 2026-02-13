@@ -30,6 +30,19 @@ export interface DiagramSearchOptions {
   limit?: number;
 }
 
+export interface ProjectMetadata {
+  name: string;
+  description?: string;
+  color?: string;
+  icon?: string;
+}
+
+export interface ProjectSummary extends ProjectMetadata {
+  diagramCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export async function listDiagrams(
   options?: DiagramListOptions,
 ): Promise<DiagramSummary[]> {
@@ -60,11 +73,72 @@ export async function searchDiagrams(
   return data.diagrams;
 }
 
-export async function listProjects(): Promise<string[]> {
+export async function listProjects(): Promise<ProjectSummary[]> {
   const res = await fetch(`${DASHBOARD_API}/projects`);
   if (!res.ok) throw new Error(`Failed to list projects: ${res.statusText}`);
   const data = await res.json();
   return data.projects;
+}
+
+export async function getProject(
+  name: string,
+): Promise<ProjectSummary | null> {
+  const res = await fetch(
+    `${DASHBOARD_API}/projects/${encodeURIComponent(name)}`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to get project: ${res.statusText}`);
+  const data = await res.json();
+  return data.project;
+}
+
+export async function createProject(meta: ProjectMetadata): Promise<void> {
+  const res = await fetch(`${DASHBOARD_API}/projects`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(meta),
+  });
+  if (res.status === 409)
+    throw new Error("Project already exists");
+  if (!res.ok) throw new Error(`Failed to create project: ${res.statusText}`);
+}
+
+export async function updateProject(
+  name: string,
+  meta: { description?: string; color?: string; icon?: string },
+): Promise<void> {
+  const res = await fetch(
+    `${DASHBOARD_API}/projects/${encodeURIComponent(name)}`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(meta),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to update project: ${res.statusText}`);
+}
+
+export async function renameProject(
+  oldName: string,
+  newName: string,
+): Promise<void> {
+  const res = await fetch(
+    `${DASHBOARD_API}/projects/${encodeURIComponent(oldName)}/rename`,
+    {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ newName }),
+    },
+  );
+  if (!res.ok) throw new Error(`Failed to rename project: ${res.statusText}`);
+}
+
+export async function deleteProject(name: string): Promise<void> {
+  const res = await fetch(
+    `${DASHBOARD_API}/projects/${encodeURIComponent(name)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(`Failed to delete project: ${res.statusText}`);
 }
 
 export async function updateDiagramMeta(

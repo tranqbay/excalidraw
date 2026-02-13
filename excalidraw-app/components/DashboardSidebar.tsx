@@ -179,52 +179,6 @@ function DiagramCard({
         >
           ...
         </button>
-        {showMenu && (
-          <div ref={menuRef} className="dashboard-diagram-card__menu">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                if (diagram.shareableUrl) {
-                  window.open(diagram.shareableUrl, "_blank");
-                }
-                setShowMenu(false);
-              }}
-              disabled={!diagram.shareableUrl}
-            >
-              Open link
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                setRenameValue(diagram.title || "");
-                setIsRenaming(true);
-              }}
-            >
-              Rename
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                setProjectValue(diagram.project || "");
-                setShowProjectInput(true);
-              }}
-            >
-              Set project
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(diagram.id);
-                setShowMenu(false);
-              }}
-              className="dashboard-diagram-card__delete"
-            >
-              Delete
-            </button>
-          </div>
-        )}
       </div>
       {showProjectInput && (
         <div
@@ -279,6 +233,52 @@ function DiagramCard({
           ))}
         </div>
       )}
+      {showMenu && (
+        <div ref={menuRef} className="dashboard-diagram-card__menu">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (diagram.shareableUrl) {
+                window.open(diagram.shareableUrl, "_blank");
+              }
+              setShowMenu(false);
+            }}
+            disabled={!diagram.shareableUrl}
+          >
+            Open link
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              setRenameValue(diagram.title || "");
+              setIsRenaming(true);
+            }}
+          >
+            Rename
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              setProjectValue(diagram.project || "");
+              setShowProjectInput(true);
+            }}
+          >
+            Set project
+          </button>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete(diagram.id);
+              setShowMenu(false);
+            }}
+            className="dashboard-diagram-card__delete"
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -287,7 +287,7 @@ function useLoadDiagram(
   excalidrawAPI: ExcalidrawImperativeAPI,
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>,
   flushDashboardSave?: () => void,
-  skipNextDashboardSave?: () => void,
+  skipNextDashboardSave?: (elements?: readonly any[]) => void,
 ) {
   return useCallback(
     async (diagram: DiagramSummary) => {
@@ -309,8 +309,8 @@ function useLoadDiagram(
           dashboardDiagramIdRef.current = diagram.id;
           localStorage.setItem("dashboard-diagram-id", diagram.id);
         }
-        // Skip the auto-save triggered by updateScene (data hasn't changed)
-        skipNextDashboardSave?.();
+        // Skip the auto-save triggered by updateScene and set fingerprint for loaded elements
+        skipNextDashboardSave?.(restored.elements);
         excalidrawAPI.updateScene({
           elements: restored.elements,
           appState: {
@@ -357,7 +357,7 @@ function AllDiagramsTab({
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
-  skipNextDashboardSave?: () => void;
+  skipNextDashboardSave?: (elements?: readonly any[]) => void;
   currentDiagramId: string | null;
   onDiagramLoaded: (id: string) => void;
 }) {
@@ -521,29 +521,6 @@ function ProjectCard({
         >
           ...
         </button>
-        {showMenu && (
-          <div ref={menuRef} className="dashboard-project-card__menu">
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                onEdit(project);
-              }}
-            >
-              Edit
-            </button>
-            <button
-              className="dashboard-diagram-card__delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                onDelete(project.name);
-              }}
-            >
-              Delete
-            </button>
-          </div>
-        )}
       </div>
       {project.description && (
         <div className="dashboard-project-card__desc">{project.description}</div>
@@ -552,6 +529,29 @@ function ProjectCard({
         <span>{project.diagramCount} diagram{project.diagramCount !== 1 ? "s" : ""}</span>
         <span>{formatDate(project.updatedAt)}</span>
       </div>
+      {showMenu && (
+        <div ref={menuRef} className="dashboard-project-card__menu">
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              onEdit(project);
+            }}
+          >
+            Edit
+          </button>
+          <button
+            className="dashboard-diagram-card__delete"
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              onDelete(project.name);
+            }}
+          >
+            Delete
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -679,7 +679,7 @@ function ProjectsTab({
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
-  skipNextDashboardSave?: () => void;
+  skipNextDashboardSave?: (elements?: readonly any[]) => void;
   currentDiagramId: string | null;
   onDiagramLoaded: (id: string) => void;
 }) {
@@ -894,13 +894,13 @@ function ProjectsTab({
 export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error";
 
 function SaveStatusIndicator({ status }: { status: DashboardSaveStatus }) {
-  if (status === "idle") return null;
   const className = `dashboard-save-status dashboard-save-status--${status}`;
   return (
     <span className={className}>
       {status === "saving" && "Saving..."}
       {status === "saved" && "\u2713 Saved"}
       {status === "error" && "\u2022 Save failed"}
+      {status === "idle" && "\u00A0"}
     </span>
   );
 }
@@ -909,7 +909,7 @@ export const DashboardSidebar: React.FC<{
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
-  skipNextDashboardSave?: () => void;
+  skipNextDashboardSave?: (elements?: readonly any[]) => void;
   dashboardSaveStatus?: DashboardSaveStatus;
 }> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, dashboardSaveStatus = "idle" }) => {
   const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(

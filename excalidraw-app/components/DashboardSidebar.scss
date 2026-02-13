@@ -69,6 +69,11 @@
     align-items: center;
     gap: 0.25rem;
     white-space: nowrap;
+    min-width: 3rem;
+
+    &--idle {
+      visibility: hidden;
+    }
 
     &--saving {
       animation: dashboard-pulse 1.5s infinite;

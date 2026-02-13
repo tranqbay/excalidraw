@@ -360,6 +360,8 @@ const ExcalidrawWrapper = () => {
   const dashboardDiagramIdRef = useRef<string | null>(null);
   // Timestamp-based skip: ignore onChange auto-saves within this window (e.g. after loading a diagram)
   const skipDashboardSaveUntilRef = useRef(0);
+  // Track element fingerprint to skip saves when elements haven't changed
+  const lastSavedFingerprintRef = useRef("");
   if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     const stored = localStorage.getItem("dashboard-diagram-id");
     dashboardDiagramIdRef.current = stored || `web-${crypto.randomUUID()}`;
@@ -379,10 +381,14 @@ const ExcalidrawWrapper = () => {
           (el: any) => !el.isDeleted && el.type !== "cameraUpdate",
         );
         if (visibleElements.length === 0) return;
+        // Skip saving if elements haven't changed since last save/load
+        const fingerprint = visibleElements.map((el: any) => `${el.id}:${el.version}`).join(",");
+        if (fingerprint === lastSavedFingerprintRef.current) return;
         setDashboardSaveStatus("saving");
         if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
         saveDiagram(id, elements, { title: name })
           .then(() => {
+            lastSavedFingerprintRef.current = fingerprint;
             setDashboardSaveStatus("saved");
             saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 2000);
           })
@@ -984,7 +990,13 @@ const ExcalidrawWrapper = () => {
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={() => debouncedDashboardSave.flush()}
-            skipNextDashboardSave={() => { skipDashboardSaveUntilRef.current = Date.now() + 1000; }}
+            skipNextDashboardSave={(elements?: readonly any[]) => {
+              skipDashboardSaveUntilRef.current = Date.now() + 6000;
+              if (elements?.length) {
+                const visible = elements.filter((el: any) => !el.isDeleted && el.type !== "cameraUpdate");
+                lastSavedFingerprintRef.current = visible.map((el: any) => `${el.id}:${el.version}`).join(",");
+              }
+            }}
             dashboardSaveStatus={dashboardSaveStatus}
           />
         )}

@@ -1,16 +1,14 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { Sidebar } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
-import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
 import { restore } from "@excalidraw/excalidraw/data/restore";
-import { decompressData } from "@excalidraw/excalidraw/data/encode";
-import { decryptData, IV_LENGTH_BYTES } from "@excalidraw/excalidraw/data/encryption";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
 import type { DiagramSummary } from "../data/dashboard";
 import {
   listDiagrams,
   searchDiagrams,
   listProjects,
+  loadDiagramElements,
   deleteDiagram,
 } from "../data/dashboard";
 
@@ -19,8 +17,6 @@ import "./DashboardSidebar.scss";
 export const DASHBOARD_SIDEBAR_NAME = "dashboard";
 const DASHBOARD_TAB_ALL = "all";
 const DASHBOARD_TAB_PROJECTS = "projects";
-
-const BACKEND_V2_GET = import.meta.env.VITE_APP_BACKEND_V2_GET_URL;
 
 function formatDate(iso: string): string {
   const d = new Date(iso);
@@ -36,73 +32,33 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString();
 }
 
-/**
- * Loads a diagram from the storage backend using its shareable URL.
- * Uses the same decryption/decompression flow as importFromBackend.
- */
-async function loadDiagramFromUrl(
-  shareableUrl: string,
-): Promise<ImportedDataState | null> {
-  try {
-    const url = new URL(shareableUrl);
-    const hash = url.hash.slice(1); // remove #
-    const jsonParam = hash.startsWith("json=")
-      ? hash.slice(5)
-      : new URLSearchParams(hash).get("json");
-    if (!jsonParam) return null;
-
-    const [id, decryptionKey] = jsonParam.split(",");
-    if (!id || !decryptionKey || !BACKEND_V2_GET) return null;
-
-    const response = await fetch(`${BACKEND_V2_GET}${id}`);
-    if (!response.ok) return null;
-
-    const buffer = await response.arrayBuffer();
-
-    // Use the new format (compressData/decompressData) first, fall back to legacy
-    try {
-      const { data: decodedBuffer } = await decompressData(
-        new Uint8Array(buffer),
-        { decryptionKey },
-      );
-      const data: ImportedDataState = JSON.parse(
-        new TextDecoder().decode(decodedBuffer),
-      );
-      return {
-        elements: data.elements || null,
-        appState: data.appState || null,
-      };
-    } catch {
-      // Legacy format: IV + encrypted data (no compression wrapper)
-      const iv = new Uint8Array(buffer.slice(0, IV_LENGTH_BYTES));
-      const encrypted = buffer.slice(IV_LENGTH_BYTES, buffer.byteLength);
-      const decrypted = await decryptData(iv, encrypted, decryptionKey);
-      const text = new TextDecoder("utf-8").decode(new Uint8Array(decrypted));
-      const data: ImportedDataState = JSON.parse(text);
-      return {
-        elements: data.elements || null,
-        appState: data.appState || null,
-      };
-    }
-  } catch (err) {
-    console.error("Failed to load diagram from URL:", err);
-    return null;
-  }
-}
-
 function DiagramCard({
   diagram,
   onLoad,
   onDelete,
 }: {
   diagram: DiagramSummary;
-  onLoad: (diagram: DiagramSummary) => void;
+  onLoad: (diagram: DiagramSummary) => Promise<void>;
   onDelete: (id: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    if (loading) return;
+    setLoading(true);
+    try {
+      await onLoad(diagram);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   return (
-    <div className="dashboard-diagram-card" onClick={() => onLoad(diagram)}>
+    <div
+      className={`dashboard-diagram-card${loading ? " dashboard-diagram-card--loading" : ""}`}
+      onClick={handleClick}
+    >
       <div className="dashboard-diagram-card__header">
         <span className="dashboard-diagram-card__title">
           {diagram.title || "Untitled"}
@@ -172,19 +128,27 @@ function DiagramCard({
 function useLoadDiagram(excalidrawAPI: ExcalidrawImperativeAPI) {
   return useCallback(
     async (diagram: DiagramSummary) => {
-      if (!diagram.shareableUrl) return;
-      const data = await loadDiagramFromUrl(diagram.shareableUrl);
-      if (!data) return;
+      try {
+        const data = await loadDiagramElements(diagram.id);
+        if (!data || !data.elements?.length) return;
 
-      const restored = restore(data, null, null, { repairBindings: true });
-      excalidrawAPI.updateScene({
-        elements: restored.elements,
-        appState: {
-          ...restored.appState,
-          name: diagram.title || "Untitled",
-        },
-        captureUpdate: CaptureUpdateAction.IMMEDIATELY,
-      });
+        const restored = restore(
+          { elements: data.elements, appState: null },
+          null,
+          null,
+          { repairBindings: true },
+        );
+        excalidrawAPI.updateScene({
+          elements: restored.elements,
+          appState: {
+            ...restored.appState,
+            name: diagram.title || "Untitled",
+          },
+          captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+        });
+      } catch (err) {
+        console.error("Failed to load diagram:", err);
+      }
     },
     [excalidrawAPI],
   );

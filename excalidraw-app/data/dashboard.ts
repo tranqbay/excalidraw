@@ -92,6 +92,15 @@ export async function saveDiagram(
   if (!res.ok) throw new Error(`Failed to save diagram: ${res.statusText}`);
 }
 
+export async function loadDiagramElements(
+  id: string,
+): Promise<{ elements: any[] } | null> {
+  const res = await fetch(`${DASHBOARD_API}/diagrams/${id}/elements`);
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`Failed to load diagram: ${res.statusText}`);
+  return res.json();
+}
+
 export async function deleteDiagram(id: string): Promise<void> {
   const res = await fetch(`${DASHBOARD_API}/diagrams/${id}`, {
     method: "DELETE",

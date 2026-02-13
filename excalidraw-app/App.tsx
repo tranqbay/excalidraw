@@ -25,6 +25,7 @@ import {
   TTDDialogTrigger,
   CaptureUpdateAction,
   reconcileElements,
+  Sidebar,
 } from "@excalidraw/excalidraw";
 import type {
   AppState,
@@ -90,6 +91,11 @@ import {
 import { AppMainMenu } from "./components/AppMainMenu";
 import { AppWelcomeScreen } from "./components/AppWelcomeScreen";
 import { AppFooter } from "./components/AppFooter";
+import {
+  DashboardSidebar,
+  DASHBOARD_SIDEBAR_NAME,
+} from "./components/DashboardSidebar";
+import { saveDiagram } from "./data/dashboard";
 import {
   Provider,
   useAtom,
@@ -348,6 +354,24 @@ const ExcalidrawWrapper = () => {
   }
 
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+
+  // Dashboard auto-save: track session diagram ID
+  const dashboardDiagramIdRef = useRef<string | null>(null);
+  if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
+    dashboardDiagramIdRef.current = `web-${crypto.randomUUID()}`;
+  }
+  const debouncedDashboardSave = useRef(
+    debounce(
+      (elements: readonly any[], name?: string) => {
+        const id = dashboardDiagramIdRef.current;
+        if (!id || !import.meta.env.VITE_APP_DASHBOARD_API_URL) return;
+        saveDiagram(id, elements, { title: name }).catch((err) =>
+          console.warn("Dashboard auto-save failed:", err),
+        );
+      },
+      5000, // 5 second debounce for server saves
+    ),
+  ).current;
 
   useEffect(() => {
     trackEvent("load", "frame", getFrame());
@@ -656,6 +680,9 @@ const ExcalidrawWrapper = () => {
       });
     }
 
+    // Auto-save to dashboard API (debounced)
+    debouncedDashboardSave(elements, appState.name || undefined);
+
     // Render the debug scene if the debug canvas is available
     if (debugCanvasRef.current && excalidrawAPI) {
       debugRenderer(
@@ -841,18 +868,29 @@ const ExcalidrawWrapper = () => {
         autoFocus={true}
         theme={editorTheme}
         renderTopRightUI={(isMobile) => {
-          if (isMobile || !collabAPI || isCollabDisabled) {
+          if (isMobile) {
             return null;
           }
           return (
             <div className="top-right-ui">
+              {import.meta.env.VITE_APP_DASHBOARD_API_URL && (
+                <Sidebar.Trigger
+                  name={DASHBOARD_SIDEBAR_NAME}
+                  tab="all"
+                  className="dashboard-sidebar-trigger"
+                >
+                  My Diagrams
+                </Sidebar.Trigger>
+              )}
               {collabError.message && <CollabError collabError={collabError} />}
-              <LiveCollaborationTrigger
-                isCollaborating={isCollaborating}
-                onSelect={() =>
-                  setShareDialogState({ isOpen: true, type: "share" })
-                }
-              />
+              {collabAPI && !isCollabDisabled && (
+                <LiveCollaborationTrigger
+                  isCollaborating={isCollaborating}
+                  onSelect={() =>
+                    setShareDialogState({ isOpen: true, type: "share" })
+                  }
+                />
+              )}
             </div>
           );
         }}
@@ -913,6 +951,9 @@ const ExcalidrawWrapper = () => {
         )}
         {excalidrawAPI && !isCollabDisabled && (
           <Collab excalidrawAPI={excalidrawAPI} />
+        )}
+        {excalidrawAPI && (
+          <DashboardSidebar excalidrawAPI={excalidrawAPI} />
         )}
 
         <ShareDialog

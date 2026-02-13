@@ -355,10 +355,14 @@ const ExcalidrawWrapper = () => {
 
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  // Dashboard auto-save: track session diagram ID
+  // Dashboard auto-save: track current diagram ID (persisted to localStorage)
   const dashboardDiagramIdRef = useRef<string | null>(null);
   if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
-    dashboardDiagramIdRef.current = `web-${crypto.randomUUID()}`;
+    const stored = localStorage.getItem("dashboard-diagram-id");
+    dashboardDiagramIdRef.current = stored || `web-${crypto.randomUUID()}`;
+    if (!stored) {
+      localStorage.setItem("dashboard-diagram-id", dashboardDiagramIdRef.current);
+    }
   }
   const debouncedDashboardSave = useRef(
     debounce(

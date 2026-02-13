@@ -144,6 +144,7 @@ function useLoadDiagram(
         // Update the diagram ID ref so auto-save updates this diagram
         if (dashboardDiagramIdRef) {
           dashboardDiagramIdRef.current = diagram.id;
+          localStorage.setItem("dashboard-diagram-id", diagram.id);
         }
         excalidrawAPI.updateScene({
           elements: restored.elements,
@@ -361,7 +362,9 @@ export const DashboardSidebar: React.FC<{
 
   const handleNewDiagram = () => {
     if (dashboardDiagramIdRef) {
-      dashboardDiagramIdRef.current = `web-${crypto.randomUUID()}`;
+      const newId = `web-${crypto.randomUUID()}`;
+      dashboardDiagramIdRef.current = newId;
+      localStorage.setItem("dashboard-diagram-id", newId);
     }
     excalidrawAPI.updateScene({
       elements: [],

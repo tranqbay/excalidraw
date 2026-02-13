@@ -129,6 +129,7 @@ function useLoadDiagram(
   excalidrawAPI: ExcalidrawImperativeAPI,
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>,
   flushDashboardSave?: () => void,
+  skipNextDashboardSave?: () => void,
 ) {
   return useCallback(
     async (diagram: DiagramSummary) => {
@@ -150,6 +151,8 @@ function useLoadDiagram(
           dashboardDiagramIdRef.current = diagram.id;
           localStorage.setItem("dashboard-diagram-id", diagram.id);
         }
+        // Skip the auto-save triggered by updateScene (data hasn't changed)
+        skipNextDashboardSave?.();
         excalidrawAPI.updateScene({
           elements: restored.elements,
           appState: {
@@ -162,7 +165,7 @@ function useLoadDiagram(
         console.error("Failed to load diagram:", err);
       }
     },
-    [excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave],
+    [excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave],
   );
 }
 
@@ -189,10 +192,12 @@ function AllDiagramsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
   flushDashboardSave,
+  skipNextDashboardSave,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
+  skipNextDashboardSave?: () => void;
 }) {
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -233,7 +238,7 @@ function AllDiagramsTab({
     [fetchDiagrams, searchTimeout],
   );
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   return (
@@ -274,10 +279,12 @@ function ProjectsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
   flushDashboardSave,
+  skipNextDashboardSave,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
+  skipNextDashboardSave?: () => void;
 }) {
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -301,7 +308,7 @@ function ProjectsTab({
     }
   }, [selectedProject]);
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   if (!selectedProject) {
@@ -363,7 +370,8 @@ export const DashboardSidebar: React.FC<{
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
-}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave }) => {
+  skipNextDashboardSave?: () => void;
+}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave }) => {
   // Only render if dashboard API URL is configured
   if (!import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     return null;
@@ -377,6 +385,8 @@ export const DashboardSidebar: React.FC<{
       dashboardDiagramIdRef.current = newId;
       localStorage.setItem("dashboard-diagram-id", newId);
     }
+    // Skip the auto-save triggered by updateScene (empty canvas, nothing to save)
+    skipNextDashboardSave?.();
     excalidrawAPI.updateScene({
       elements: [],
       appState: { name: "" },
@@ -410,6 +420,7 @@ export const DashboardSidebar: React.FC<{
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={flushDashboardSave}
+            skipNextDashboardSave={skipNextDashboardSave}
           />
         </Sidebar.Tab>
         <Sidebar.Tab tab={DASHBOARD_TAB_PROJECTS}>
@@ -417,6 +428,7 @@ export const DashboardSidebar: React.FC<{
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={flushDashboardSave}
+            skipNextDashboardSave={skipNextDashboardSave}
           />
         </Sidebar.Tab>
       </Sidebar.Tabs>

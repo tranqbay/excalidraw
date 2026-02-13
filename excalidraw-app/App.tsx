@@ -357,6 +357,7 @@ const ExcalidrawWrapper = () => {
 
   // Dashboard auto-save: track current diagram ID (persisted to localStorage)
   const dashboardDiagramIdRef = useRef<string | null>(null);
+  const skipNextDashboardSaveRef = useRef(false);
   if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     const stored = localStorage.getItem("dashboard-diagram-id");
     dashboardDiagramIdRef.current = stored || `web-${crypto.randomUUID()}`;
@@ -690,7 +691,11 @@ const ExcalidrawWrapper = () => {
     }
 
     // Auto-save to dashboard API (debounced)
-    debouncedDashboardSave(elements, appState.name || undefined);
+    if (skipNextDashboardSaveRef.current) {
+      skipNextDashboardSaveRef.current = false;
+    } else {
+      debouncedDashboardSave(elements, appState.name || undefined);
+    }
 
     // Render the debug scene if the debug canvas is available
     if (debugCanvasRef.current && excalidrawAPI) {
@@ -966,6 +971,7 @@ const ExcalidrawWrapper = () => {
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={() => debouncedDashboardSave.flush()}
+            skipNextDashboardSave={() => { skipNextDashboardSaveRef.current = true; }}
           />
         )}
 

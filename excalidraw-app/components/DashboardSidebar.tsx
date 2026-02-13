@@ -329,6 +329,14 @@ function useLoadDiagram(
 
 function useDeleteDiagram(
   setDiagrams: React.Dispatch<React.SetStateAction<DiagramSummary[]>>,
+  opts?: {
+    currentDiagramId: string | null;
+    dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
+    flushDashboardSave?: () => void;
+    skipNextDashboardSave?: (elements?: readonly any[]) => void;
+    excalidrawAPI?: ExcalidrawImperativeAPI;
+    onDiagramLoaded?: (id: string) => void;
+  },
 ) {
   return useCallback(
     async (id: string) => {
@@ -338,11 +346,25 @@ function useDeleteDiagram(
       try {
         await deleteDiagram(id);
         setDiagrams((prev) => prev.filter((d) => d.id !== id));
+        // If we just deleted the currently loaded diagram, switch to a new blank one
+        // so auto-save doesn't re-create the deleted diagram
+        if (opts && id === opts.currentDiagramId && opts.dashboardDiagramIdRef && opts.excalidrawAPI) {
+          const newId = `web-${crypto.randomUUID()}`;
+          opts.dashboardDiagramIdRef.current = newId;
+          localStorage.setItem("dashboard-diagram-id", newId);
+          opts.skipNextDashboardSave?.([]);
+          opts.excalidrawAPI.updateScene({
+            elements: [],
+            appState: { name: "" },
+            captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+          });
+          opts.onDiagramLoaded?.(newId);
+        }
       } catch (err) {
         console.error("Failed to delete diagram:", err);
       }
     },
-    [setDiagrams],
+    [setDiagrams, opts],
   );
 }
 
@@ -405,7 +427,14 @@ function AllDiagramsTab({
     await baseHandleLoad(diagram);
     onDiagramLoaded(diagram.id);
   }, [baseHandleLoad, onDiagramLoaded]);
-  const handleDelete = useDeleteDiagram(setDiagrams);
+  const handleDelete = useDeleteDiagram(setDiagrams, {
+    currentDiagramId,
+    dashboardDiagramIdRef,
+    flushDashboardSave,
+    skipNextDashboardSave,
+    excalidrawAPI,
+    onDiagramLoaded: onDiagramLoaded,
+  });
 
   const handleRename = useCallback(async (id: string, title: string) => {
     await updateDiagramMeta(id, { title });
@@ -717,7 +746,14 @@ function ProjectsTab({
     await baseHandleLoad(diagram);
     onDiagramLoaded(diagram.id);
   }, [baseHandleLoad, onDiagramLoaded]);
-  const handleDeleteDiagram = useDeleteDiagram(setDiagrams);
+  const handleDeleteDiagram = useDeleteDiagram(setDiagrams, {
+    currentDiagramId,
+    dashboardDiagramIdRef,
+    flushDashboardSave,
+    skipNextDashboardSave,
+    excalidrawAPI,
+    onDiagramLoaded: onDiagramLoaded,
+  });
 
   const handleRename = useCallback(async (id: string, title: string) => {
     await updateDiagramMeta(id, { title });

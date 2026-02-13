@@ -357,7 +357,8 @@ const ExcalidrawWrapper = () => {
 
   // Dashboard auto-save: track current diagram ID (persisted to localStorage)
   const dashboardDiagramIdRef = useRef<string | null>(null);
-  const skipNextDashboardSaveRef = useRef(false);
+  // Timestamp-based skip: ignore onChange auto-saves within this window (e.g. after loading a diagram)
+  const skipDashboardSaveUntilRef = useRef(0);
   if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     const stored = localStorage.getItem("dashboard-diagram-id");
     dashboardDiagramIdRef.current = stored || `web-${crypto.randomUUID()}`;
@@ -691,8 +692,8 @@ const ExcalidrawWrapper = () => {
     }
 
     // Auto-save to dashboard API (debounced)
-    if (skipNextDashboardSaveRef.current) {
-      skipNextDashboardSaveRef.current = false;
+    if (Date.now() < skipDashboardSaveUntilRef.current) {
+      debouncedDashboardSave.cancel();
     } else {
       debouncedDashboardSave(elements, appState.name || undefined);
     }
@@ -971,7 +972,7 @@ const ExcalidrawWrapper = () => {
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={() => debouncedDashboardSave.flush()}
-            skipNextDashboardSave={() => { skipNextDashboardSaveRef.current = true; }}
+            skipNextDashboardSave={() => { skipDashboardSaveUntilRef.current = Date.now() + 1000; }}
           />
         )}
 

@@ -965,6 +965,7 @@ const ExcalidrawWrapper = () => {
           <DashboardSidebar
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
+            flushDashboardSave={() => debouncedDashboardSave.flush()}
           />
         )}
 

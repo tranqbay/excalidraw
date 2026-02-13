@@ -128,10 +128,14 @@ function DiagramCard({
 function useLoadDiagram(
   excalidrawAPI: ExcalidrawImperativeAPI,
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>,
+  flushDashboardSave?: () => void,
 ) {
   return useCallback(
     async (diagram: DiagramSummary) => {
       try {
+        // Flush any pending auto-save for the current diagram before switching
+        flushDashboardSave?.();
+
         const data = await loadDiagramElements(diagram.id);
         if (!data || !data.elements?.length) return;
 
@@ -158,7 +162,7 @@ function useLoadDiagram(
         console.error("Failed to load diagram:", err);
       }
     },
-    [excalidrawAPI, dashboardDiagramIdRef],
+    [excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave],
   );
 }
 
@@ -184,9 +188,11 @@ function useDeleteDiagram(
 function AllDiagramsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
+  flushDashboardSave,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
+  flushDashboardSave?: () => void;
 }) {
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -227,7 +233,7 @@ function AllDiagramsTab({
     [fetchDiagrams, searchTimeout],
   );
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   return (
@@ -267,9 +273,11 @@ function AllDiagramsTab({
 function ProjectsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
+  flushDashboardSave,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
+  flushDashboardSave?: () => void;
 }) {
   const [projects, setProjects] = useState<string[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
@@ -293,7 +301,7 @@ function ProjectsTab({
     }
   }, [selectedProject]);
 
-  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef);
+  const handleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave);
   const handleDelete = useDeleteDiagram(setDiagrams);
 
   if (!selectedProject) {
@@ -354,13 +362,16 @@ function ProjectsTab({
 export const DashboardSidebar: React.FC<{
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
-}> = ({ excalidrawAPI, dashboardDiagramIdRef }) => {
+  flushDashboardSave?: () => void;
+}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave }) => {
   // Only render if dashboard API URL is configured
   if (!import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     return null;
   }
 
   const handleNewDiagram = () => {
+    // Flush pending save for current diagram before switching
+    flushDashboardSave?.();
     if (dashboardDiagramIdRef) {
       const newId = `web-${crypto.randomUUID()}`;
       dashboardDiagramIdRef.current = newId;
@@ -398,12 +409,14 @@ export const DashboardSidebar: React.FC<{
           <AllDiagramsTab
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
+            flushDashboardSave={flushDashboardSave}
           />
         </Sidebar.Tab>
         <Sidebar.Tab tab={DASHBOARD_TAB_PROJECTS}>
           <ProjectsTab
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
+            flushDashboardSave={flushDashboardSave}
           />
         </Sidebar.Tab>
       </Sidebar.Tabs>

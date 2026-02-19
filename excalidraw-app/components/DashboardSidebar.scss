@@ -165,6 +165,10 @@
       background: var(--color-primary-light, rgba(101, 84, 192, 0.06));
       border-left: 3px solid var(--color-primary);
     }
+
+    &--menu-open {
+      z-index: 5;
+    }
   }
 
   .dashboard-diagram-card__header {
@@ -331,6 +335,10 @@
     &:hover {
       background: var(--button-hover-bg, rgba(0, 0, 0, 0.04));
       border-color: var(--color-primary);
+    }
+
+    &--menu-open {
+      z-index: 5;
     }
   }
 

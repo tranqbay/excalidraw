@@ -109,7 +109,7 @@ function DiagramCard({
   }, [showProjectInput]);
 
   const handleClick = async () => {
-    if (loading || isRenaming || showProjectInput) return;
+    if (loading || isRenaming || showProjectInput || showMenu) return;
     setLoading(true);
     try {
       await onLoad(diagram);
@@ -145,6 +145,7 @@ function DiagramCard({
     "dashboard-diagram-card",
     loading && "dashboard-diagram-card--loading",
     isCurrent && "dashboard-diagram-card--current",
+    (showMenu || showProjectInput) && "dashboard-diagram-card--menu-open",
   ].filter(Boolean).join(" ");
 
   return (
@@ -531,7 +532,7 @@ function ProjectCard({
   }, [showMenu]);
 
   return (
-    <div className="dashboard-project-card" onClick={() => onSelect(project)}>
+    <div className={`dashboard-project-card${showMenu ? " dashboard-project-card--menu-open" : ""}`} onClick={() => onSelect(project)}>
       <div className="dashboard-project-card__header">
         <span
           className="dashboard-project-card__dot"

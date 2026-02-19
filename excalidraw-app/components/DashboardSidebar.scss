@@ -262,6 +262,7 @@
     color: var(--text-primary-color);
     opacity: 0.6;
     flex-wrap: wrap;
+    pointer-events: none;
   }
 
   .dashboard-diagram-card__project {
@@ -399,6 +400,7 @@
     white-space: nowrap;
     margin-bottom: 0.25rem;
     padding-left: 1rem;
+    pointer-events: none;
   }
 
   .dashboard-project-card__meta {
@@ -408,6 +410,7 @@
     color: var(--text-primary-color);
     opacity: 0.5;
     padding-left: 1rem;
+    pointer-events: none;
   }
 
   // Project form

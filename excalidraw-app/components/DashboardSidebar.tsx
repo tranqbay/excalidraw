@@ -7,7 +7,6 @@ import type {
   DiagramSummary,
   ProjectSummary,
   ProjectMetadata,
-  ShareEntry,
 } from "../data/dashboard";
 import {
   listDiagrams,
@@ -22,13 +21,6 @@ import {
   deleteProject,
   setDiagramVisibility,
   setProjectVisibility,
-  listDiagramShares,
-  listProjectShares,
-  shareDiagram,
-  unshareDiagram,
-  shareProject,
-  unshareProject,
-  lookupUser,
 } from "../data/dashboard";
 import type { AuthState } from "../data/auth";
 import type { CollabAPI } from "../collab/Collab";
@@ -135,194 +127,7 @@ function LoginForm({
 }
 
 // =============================================================
-// Share Dialog
-// =============================================================
-
-function ShareDialog({
-  resourceType,
-  resourceId,
-  resourceTitle,
-  visibility,
-  onClose,
-  onVisibilityChange,
-}: {
-  resourceType: "diagram" | "project";
-  resourceId: string;
-  resourceTitle: string;
-  visibility: "public" | "private";
-  onClose: () => void;
-  onVisibilityChange: (vis: "public" | "private") => void;
-}) {
-  const [shares, setShares] = useState<ShareEntry[]>([]);
-  const [email, setEmail] = useState("");
-  const [permission, setPermission] = useState<"read" | "write">("write");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const fetchShares = resourceType === "project" ? listProjectShares : listDiagramShares;
-    fetchShares(resourceId).then(setShares).catch(() => {});
-  }, [resourceId, resourceType]);
-
-  useEffect(() => {
-    const handleMouseDown = (e: MouseEvent) => {
-      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    document.addEventListener("mousedown", handleMouseDown);
-    document.addEventListener("keydown", handleKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", handleMouseDown);
-      document.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [onClose]);
-
-  const handleAdd = async () => {
-    if (!email.trim()) return;
-    setLoading(true);
-    setError(null);
-    try {
-      // Try lookup by email first
-      const user = await lookupUser(email.trim());
-      const targetId = user?.userId || email.trim();
-      const doShare = resourceType === "project" ? shareProject : shareDiagram;
-      const doListShares = resourceType === "project" ? listProjectShares : listDiagramShares;
-      await doShare(resourceId, targetId, permission);
-      const updated = await doListShares(resourceId);
-      setShares(updated);
-      setEmail("");
-    } catch (err: any) {
-      setError(err.message || "Failed to share");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleRevoke = async (userId: string) => {
-    try {
-      const doUnshare = resourceType === "project" ? unshareProject : unshareDiagram;
-      await doUnshare(resourceId, userId);
-      setShares((prev) => prev.filter((s) => s.sharedWith !== userId));
-    } catch (err) {
-      console.error("Revoke failed:", err);
-    }
-  };
-
-  const handleToggleVisibility = async () => {
-    const newVis = visibility === "public" ? "private" : "public";
-    try {
-      const doSetVis = resourceType === "project" ? setProjectVisibility : setDiagramVisibility;
-      await doSetVis(resourceId, newVis);
-      onVisibilityChange(newVis);
-    } catch (err) {
-      console.error("Toggle visibility failed:", err);
-    }
-  };
-
-  return (
-    <div
-      ref={dialogRef}
-      className="dashboard-share-dialog"
-      onClick={(e) => e.stopPropagation()}
-    >
-      <div className="dashboard-share-dialog__title">
-        Share "{resourceTitle}"
-        <button className="dashboard-share-dialog__close" onClick={onClose}>
-          &times;
-        </button>
-      </div>
-
-      <div className="dashboard-share-dialog__add">
-        <input
-          type="text"
-          placeholder="Enter email or user ID..."
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          onKeyDown={(e) => {
-            e.stopPropagation();
-            if (e.key === "Enter") handleAdd();
-          }}
-        />
-        <button
-          className="dashboard-share-dialog__add-btn"
-          onClick={handleAdd}
-          disabled={loading || !email.trim()}
-        >
-          + Share
-        </button>
-      </div>
-
-      <div className="dashboard-share-dialog__perm-select">
-        <label>
-          <input
-            type="radio"
-            name="share-perm"
-            checked={permission === "read"}
-            onChange={() => setPermission("read")}
-          />
-          Read
-        </label>
-        <label>
-          <input
-            type="radio"
-            name="share-perm"
-            checked={permission === "write"}
-            onChange={() => setPermission("write")}
-          />
-          Write
-        </label>
-      </div>
-
-      {error && <span className="dashboard-login-form__error">{error}</span>}
-
-      {shares.length > 0 && (
-        <div className="dashboard-share-dialog__list">
-          {shares.map((s) => (
-            <div key={s.id} className="dashboard-share-dialog__item">
-              <span className="dashboard-share-dialog__item-info">
-                {s.sharedWith}
-              </span>
-              <span className="dashboard-share-dialog__item-perm">
-                {s.permission}
-              </span>
-              <button
-                className="dashboard-share-dialog__item-revoke"
-                onClick={() => handleRevoke(s.sharedWith)}
-              >
-                Revoke
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="dashboard-share-dialog__visibility">
-        <span>
-          Visibility: {visibility === "private" ? "Private \uD83D\uDD12" : "Public"}
-        </span>
-        <button
-          className="dashboard-share-dialog__visibility-btn"
-          onClick={handleToggleVisibility}
-        >
-          Make {visibility === "public" ? "private" : "public"}
-        </button>
-      </div>
-      <div className="dashboard-share-dialog__visibility-note">
-        {visibility === "public"
-          ? "Public diagrams are visible to everyone, even without login."
-          : "Only you and shared people can see this."}
-      </div>
-    </div>
-  );
-}
-
-// =============================================================
-// Project Picker (unchanged)
+// Project Picker
 // =============================================================
 
 function ProjectPicker({
@@ -464,7 +269,8 @@ function DiagramCard({
   const [renameValue, setRenameValue] = useState("");
   const [showProjectPicker, setShowProjectPicker] = useState(false);
   const [pickerProjects, setPickerProjects] = useState<ProjectSummary[]>([]);
-  const [showShareDialog, setShowShareDialog] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
+  const [visibilityFeedback, setVisibilityFeedback] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -473,7 +279,6 @@ function DiagramCard({
   const isCurrent = diagram.id === currentDiagramId;
   const isOwner = auth?.isAuthenticated && auth.userId === diagram.ownerId;
   const isLegacy = !diagram.ownerId;
-  const isSharedWithMe = auth?.isAuthenticated && !isOwner && !isLegacy && diagram.ownerId !== null;
 
   useEffect(() => {
     if (!showMenu) return;
@@ -512,7 +317,7 @@ function DiagramCard({
   }, [showProjectPicker]);
 
   const handleClick = async () => {
-    if (loading || isRenaming || showProjectPicker || showMenu || showShareDialog) return;
+    if (loading || isRenaming || showProjectPicker || showMenu) return;
     setLoading(true);
     try {
       await onLoad(diagram);
@@ -559,7 +364,7 @@ function DiagramCard({
     "dashboard-diagram-card",
     loading && "dashboard-diagram-card--loading",
     isCurrent && "dashboard-diagram-card--current",
-    (showMenu || showProjectPicker || showShareDialog) && "dashboard-diagram-card--menu-open",
+    (showMenu || showProjectPicker) && "dashboard-diagram-card--menu-open",
   ].filter(Boolean).join(" ");
 
   return (
@@ -583,7 +388,6 @@ function DiagramCard({
           <span className="dashboard-diagram-card__title">
             {diagram.pinned && <span className="dashboard-pin-icon" title="Pinned">&#x1F4CC;</span>}
             {diagram.visibility === "private" && <span className="dashboard-visibility-icon" title="Private">&#x1F512;</span>}
-            {isSharedWithMe && <span className="dashboard-visibility-icon" title="Shared with you">&#x1F465;</span>}
             {diagram.title || "Untitled"}
             {diagram.collabLink && (
               <span className="dashboard-live-badge" title="Live collaboration active">
@@ -613,18 +417,6 @@ function DiagramCard({
           onClose={() => setShowProjectPicker(false)}
         />
       )}
-      {showShareDialog && isOwner && (
-        <ShareDialog
-          resourceType="diagram"
-          resourceId={diagram.id}
-          resourceTitle={diagram.title || "Untitled"}
-          visibility={diagram.visibility}
-          onClose={() => setShowShareDialog(false)}
-          onVisibilityChange={(vis) => {
-            onDiagramUpdate?.(diagram.id, { visibility: vis });
-          }}
-        />
-      )}
       <div className="dashboard-diagram-card__meta">
         {!hideProject && diagram.project && (
           <span className="dashboard-diagram-card__project">
@@ -638,11 +430,6 @@ function DiagramCard({
           {formatDate(diagram.updatedAt)}
         </span>
       </div>
-      {isSharedWithMe && diagram.ownerId && (
-        <div className="dashboard-diagram-card__shared-by">
-          shared by {diagram.ownerId}
-        </div>
-      )}
       {diagram.tags.length > 0 && (
         <div className="dashboard-diagram-card__tags">
           {diagram.tags.map((tag) => (
@@ -652,8 +439,13 @@ function DiagramCard({
           ))}
         </div>
       )}
+      {/* Visibility feedback toast */}
+      {visibilityFeedback && (
+        <div className="dashboard-diagram-card__toast">{visibilityFeedback}</div>
+      )}
       {showMenu && (
         <div ref={menuRef} className="dashboard-diagram-card__menu">
+          {/* --- Links section --- */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -666,6 +458,48 @@ function DiagramCard({
           >
             Open link
           </button>
+          {diagram.shareableUrl && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  await navigator.clipboard.writeText(diagram.shareableUrl!);
+                  setLinkCopied(true);
+                  setTimeout(() => {
+                    setLinkCopied(false);
+                    setShowMenu(false);
+                  }, 800);
+                } catch {
+                  window.prompt("Copy this link:", diagram.shareableUrl!);
+                  setShowMenu(false);
+                }
+              }}
+            >
+              {linkCopied ? "Copied!" : "Copy link"}
+            </button>
+          )}
+          {diagram.collabLink && (
+            <button
+              onClick={async (e) => {
+                e.stopPropagation();
+                try {
+                  await navigator.clipboard.writeText(diagram.collabLink!);
+                  setLinkCopied(true);
+                  setTimeout(() => {
+                    setLinkCopied(false);
+                    setShowMenu(false);
+                  }, 800);
+                } catch {
+                  window.prompt("Copy this collab link:", diagram.collabLink!);
+                  setShowMenu(false);
+                }
+              }}
+            >
+              {linkCopied ? "Copied!" : "Copy collab link"}
+            </button>
+          )}
+          {/* --- Edit section --- */}
+          <div className="dashboard-diagram-card__menu-sep" />
           {(isOwner || isLegacy) && (
             <button
               onClick={(e) => {
@@ -700,6 +534,7 @@ function DiagramCard({
           )}
           {isOwner && (
             <>
+              <div className="dashboard-diagram-card__menu-sep" />
               <button
                 onClick={async (e) => {
                   e.stopPropagation();
@@ -708,35 +543,34 @@ function DiagramCard({
                     const newVis = diagram.visibility === "public" ? "private" : "public";
                     await setDiagramVisibility(diagram.id, newVis);
                     onDiagramUpdate?.(diagram.id, { visibility: newVis });
+                    setVisibilityFeedback(newVis === "private" ? "Made private" : "Made public");
+                    setTimeout(() => setVisibilityFeedback(null), 1500);
                   } catch (err) {
                     console.error("Toggle visibility failed:", err);
+                    setVisibilityFeedback("Failed to change visibility");
+                    setTimeout(() => setVisibilityFeedback(null), 2000);
                   }
                 }}
               >
                 Make {diagram.visibility === "public" ? "private" : "public"}
               </button>
+            </>
+          )}
+          {/* --- Danger section --- */}
+          {(isOwner || isLegacy) && (
+            <>
+              <div className="dashboard-diagram-card__menu-sep" />
               <button
                 onClick={(e) => {
                   e.stopPropagation();
+                  onDelete(diagram.id);
                   setShowMenu(false);
-                  setShowShareDialog(true);
                 }}
+                className="dashboard-diagram-card__delete"
               >
-                Share
+                Delete
               </button>
             </>
-          )}
-          {(isOwner || isLegacy) && (
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete(diagram.id);
-                setShowMenu(false);
-              }}
-              className="dashboard-diagram-card__delete"
-            >
-              Delete
-            </button>
           )}
         </div>
       )}
@@ -806,22 +640,18 @@ function useLoadDiagram(
             updateDiagramMeta(diagram.id, { collabLink: null }).catch(
               (err) => console.warn("Failed to clear stale collab link:", err),
             );
-          } else if (data.permission === "write" && !isOwner && !collabAPI.isCollaborating()) {
-            // Shared user (write) loading a diagram with an active collab session.
-            // Prompt to join live collaboration.
-            const roomData = getCollaborationLinkData(diagram.collabLink);
-            if (roomData) {
-              const join = window.confirm(
-                "A live collaboration session is active on this diagram. Join?",
-              );
-              if (join) {
+          } else if (!isOwner && !collabAPI.isCollaborating()) {
+            // Non-owner loading a diagram with an active collab session.
+            // Public diagrams or legacy diagrams: auto-join the live session.
+            const canJoin = diagram.visibility === "public" || isLegacy;
+            if (canJoin) {
+              const roomData = getCollaborationLinkData(diagram.collabLink);
+              if (roomData) {
                 window.history.pushState({}, "", diagram.collabLink);
                 collabAPI.startCollaboration(roomData);
               }
             }
           }
-          // Read-only shared users: no join prompt — they already got
-          // onReadOnlyDiagram above, which shows the fork-on-edit UI.
         }
       } catch (err) {
         console.error("Failed to load diagram:", err);
@@ -1084,7 +914,6 @@ function ProjectCard({
   const menuBtnRef = useRef<HTMLButtonElement>(null);
 
   const isOwner = auth?.isAuthenticated && auth.userId === project.ownerId;
-  const isSharedWithMe = auth?.isAuthenticated && !isOwner && project.ownerId !== null && !(!project.ownerId);
 
   useEffect(() => {
     if (!showMenu) return;
@@ -1120,7 +949,6 @@ function ProjectCard({
         <span className="dashboard-project-card__name">
           {project.pinned && <span className="dashboard-pin-icon" title="Pinned">&#x1F4CC;</span>}
           {project.visibility === "private" && <span className="dashboard-visibility-icon" title="Private">&#x1F512;</span>}
-          {isSharedWithMe && <span className="dashboard-visibility-icon" title="Shared with you">&#x1F465;</span>}
           {project.name}
         </span>
         <button
@@ -1717,25 +1545,27 @@ export const DashboardSidebar: React.FC<{
           >
             + New
           </button>
-          {/* Auth UI */}
-          {!isAuthenticated && !showLoginForm && import.meta.env.VITE_APP_AUTH_LOGIN_URL && (
-            <button
-              className="dashboard-login-btn"
-              onClick={() => setShowLoginForm(true)}
-            >
-              Log in
-            </button>
-          )}
-          {isAuthenticated && (
-            <div className="dashboard-user-info">
-              <span className="dashboard-user-info__email" title={auth?.email || undefined}>
-                {auth?.email || "Logged in"}
-              </span>
-              <button className="dashboard-user-info__logout" onClick={onLogout}>
-                Log out
+          {/* Auth UI — own row below title */}
+          <div className="dashboard-auth-row">
+            {!isAuthenticated && !showLoginForm && import.meta.env.VITE_APP_AUTH_LOGIN_URL && (
+              <button
+                className="dashboard-login-btn"
+                onClick={() => setShowLoginForm(true)}
+              >
+                Log in
               </button>
-            </div>
-          )}
+            )}
+            {isAuthenticated && (
+              <div className="dashboard-user-info">
+                <span className="dashboard-user-info__email" title={auth?.email || undefined}>
+                  {auth?.email || "Logged in"}
+                </span>
+                <button className="dashboard-user-info__logout" onClick={onLogout}>
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
           <Sidebar.TabTriggers>
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_ALL}>
               All

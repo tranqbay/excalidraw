@@ -8,8 +8,40 @@
   .top-right-ui {
     display: flex;
     justify-content: center;
-    align-items: flex-start;
+    align-items: center;
     gap: 0.5rem;
+  }
+
+  .dashboard-sidebar-trigger {
+    white-space: nowrap;
+  }
+
+  .top-right-live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
+    border-radius: var(--border-radius-lg);
+    background-color: #0fb884;
+    color: #fff;
+    font-size: 0.75rem;
+    font-weight: 600;
+    height: var(--lg-button-size);
+    box-sizing: border-box;
+    white-space: nowrap;
+
+    &__dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background-color: #fff;
+      animation: live-pulse 1.5s ease-in-out infinite;
+    }
+  }
+
+  @keyframes live-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
   }
 
   .footer-center {

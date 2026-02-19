@@ -55,80 +55,6 @@ function formatDate(iso: string): string {
 // Login Form
 // =============================================================
 
-function LoginForm({
-  onLogin,
-  onCancel,
-}: {
-  onLogin: (email: string, password: string) => Promise<void>;
-  onCancel: () => void;
-}) {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const emailRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    emailRef.current?.focus();
-  }, []);
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email.trim() || !password) return;
-    setLoading(true);
-    setError(null);
-    try {
-      await onLogin(email.trim(), password);
-    } catch (err: any) {
-      setError(err.message || "Login failed");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <form className="dashboard-login-form" onSubmit={handleSubmit}>
-      <span className="dashboard-login-form__label">Email</span>
-      <input
-        ref={emailRef}
-        className="dashboard-login-form__input"
-        type="email"
-        value={email}
-        onChange={(e) => setEmail(e.target.value)}
-        onKeyDown={(e) => e.stopPropagation()}
-        placeholder="admin@example.com"
-        autoComplete="email"
-      />
-      <span className="dashboard-login-form__label">Password</span>
-      <input
-        className="dashboard-login-form__input"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        onKeyDown={(e) => e.stopPropagation()}
-        autoComplete="current-password"
-      />
-      {error && <span className="dashboard-login-form__error">{error}</span>}
-      <div className="dashboard-login-form__actions">
-        <button
-          type="button"
-          className="dashboard-login-form__cancel"
-          onClick={onCancel}
-          disabled={loading}
-        >
-          Cancel
-        </button>
-        <button
-          type="submit"
-          className="dashboard-login-form__submit"
-          disabled={loading || !email.trim() || !password}
-        >
-          {loading ? "Logging in..." : "Log in"}
-        </button>
-      </div>
-    </form>
-  );
-}
 
 // =============================================================
 // Project Picker
@@ -1649,7 +1575,6 @@ export const DashboardSidebar: React.FC<{
   dashboardSaveStatus?: DashboardSaveStatus;
   auth?: AuthState;
   collabAPI?: CollabAPI | null;
-  onLogin?: (email: string, password: string) => Promise<void>;
   onLogout?: () => void;
   onForkDiagram?: () => void;
   onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
@@ -1661,7 +1586,6 @@ export const DashboardSidebar: React.FC<{
   dashboardSaveStatus = "idle",
   auth,
   collabAPI,
-  onLogin,
   onLogout,
   onForkDiagram,
   onReadOnlyDiagram,
@@ -1690,8 +1614,6 @@ export const DashboardSidebar: React.FC<{
       return false;
     }
   });
-  const [showLoginForm, setShowLoginForm] = useState(false);
-
   const handleDock = useCallback((isDocked: boolean) => {
     setDocked(isDocked);
     try {
@@ -1729,11 +1651,6 @@ export const DashboardSidebar: React.FC<{
     }
   };
 
-  const handleLogin = async (email: string, password: string) => {
-    await onLogin?.(email, password);
-    setShowLoginForm(false);
-  };
-
   const isAuthenticated = auth?.isAuthenticated;
 
   return (
@@ -1749,17 +1666,9 @@ export const DashboardSidebar: React.FC<{
           >
             + New
           </button>
-          {/* Auth UI — own row below title */}
-          <div className="dashboard-auth-row">
-            {!isAuthenticated && !showLoginForm && import.meta.env.VITE_APP_AUTH_LOGIN_URL && (
-              <button
-                className="dashboard-login-btn"
-                onClick={() => setShowLoginForm(true)}
-              >
-                Log in
-              </button>
-            )}
-            {isAuthenticated && (
+          {/* Auth status */}
+          {isAuthenticated && (
+            <div className="dashboard-auth-row">
               <div className="dashboard-user-info">
                 <span className="dashboard-user-info__email" title={auth?.email || undefined}>
                   {auth?.email || "Logged in"}
@@ -1768,8 +1677,8 @@ export const DashboardSidebar: React.FC<{
                   Log out
                 </button>
               </div>
-            )}
-          </div>
+            </div>
+          )}
           <Sidebar.TabTriggers>
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_ALL}>
               All
@@ -1784,14 +1693,6 @@ export const DashboardSidebar: React.FC<{
             </Sidebar.TabTrigger>
           </Sidebar.TabTriggers>
         </Sidebar.Header>
-
-        {/* Login form (inline, above tabs content) */}
-        {showLoginForm && !isAuthenticated && (
-          <LoginForm
-            onLogin={handleLogin}
-            onCancel={() => setShowLoginForm(false)}
-          />
-        )}
 
         <Sidebar.Tab tab={DASHBOARD_TAB_ALL}>
           <DiagramsTab

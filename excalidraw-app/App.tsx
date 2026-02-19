@@ -99,7 +99,7 @@ import type { DashboardSaveStatus } from "./components/DashboardSidebar";
 import { saveDiagram } from "./data/dashboard";
 import { queueSave, drainQueue } from "./data/dashboardOfflineQueue";
 import type { AuthState } from "./data/auth";
-import { getAuthState, login as authLogin, logout as authLogout } from "./data/auth";
+import { getAuthState, logout as authLogout } from "./data/auth";
 import {
   Provider,
   useAtom,
@@ -450,11 +450,6 @@ const ExcalidrawWrapper = () => {
   const collabError = useAtomValue(collabErrorIndicatorAtom);
 
   // Auth handlers
-  const handleLogin = useCallback(async (email: string, password: string) => {
-    const state = await authLogin(email, password);
-    setAuthState(state);
-  }, []);
-
   const handleLogout = useCallback(() => {
     authLogout();
     setAuthState({ isAuthenticated: false, userId: null, userType: null, email: null });
@@ -1029,6 +1024,12 @@ const ExcalidrawWrapper = () => {
                   {isMobile ? null : "My Diagrams"}
                 </Sidebar.Trigger>
               )}
+              {isCollaborating && (
+                <div className="top-right-live-badge">
+                  <span className="top-right-live-badge__dot" />
+                  Live
+                </div>
+              )}
               {!isMobile && collabError.message && (
                 <CollabError collabError={collabError} />
               )}
@@ -1121,7 +1122,6 @@ const ExcalidrawWrapper = () => {
             dashboardSaveStatus={dashboardSaveStatus}
             auth={authState}
             collabAPI={collabAPI}
-            onLogin={handleLogin}
             onLogout={handleLogout}
             onForkDiagram={handleForkDiagram}
             onReadOnlyDiagram={handleReadOnlyDiagram}

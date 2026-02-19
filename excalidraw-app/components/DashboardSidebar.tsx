@@ -444,6 +444,7 @@ function DiagramCard({
   currentDiagramId,
   auth,
   onDiagramUpdate,
+  hideProject,
 }: {
   diagram: DiagramSummary;
   onLoad: (diagram: DiagramSummary) => Promise<void>;
@@ -455,6 +456,7 @@ function DiagramCard({
   currentDiagramId: string | null;
   auth?: AuthState;
   onDiagramUpdate?: (id: string, updates: Partial<DiagramSummary>) => void;
+  hideProject?: boolean;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -624,7 +626,7 @@ function DiagramCard({
         />
       )}
       <div className="dashboard-diagram-card__meta">
-        {diagram.project && (
+        {!hideProject && diagram.project && (
           <span className="dashboard-diagram-card__project">
             {diagram.project}
           </span>
@@ -1577,6 +1579,7 @@ function ProjectsTab({
             currentDiagramId={currentDiagramId}
             auth={auth}
             onDiagramUpdate={handleDiagramUpdate}
+            hideProject
           />
         ))}
       </div>

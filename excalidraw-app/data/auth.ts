@@ -90,8 +90,8 @@ export function getAuthState(): AuthState {
     if (activeToken) {
       const base64 = activeToken.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
       const payload = JSON.parse(atob(base64));
-      userId = payload.userId || payload.sub || null;
-      userType = payload.userType || null;
+      userId = payload.userId || payload.identifier || payload.sub || null;
+      userType = payload.userType || payload.meta?.userType || null;
       email = payload.email || null;
     }
   } catch {
@@ -120,10 +120,24 @@ export async function login(email: string, password: string): Promise<AuthState>
   const data: LoginResponse = await res.json();
   storeTokens(data);
 
+  // Extract userId from JWT payload (field is "identifier" in Atlas tokens)
+  let userId: string | null = data.meta.userId || null;
+  let userType: string | null = data.meta.userType || null;
+  if (!userId && data.token) {
+    try {
+      const base64 = data.token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+      const payload = JSON.parse(atob(base64));
+      userId = payload.userId || payload.identifier || payload.sub || null;
+      if (!userType) userType = payload.userType || payload.meta?.userType || null;
+    } catch {
+      // Token decode failed — userId stays null
+    }
+  }
+
   return {
     isAuthenticated: true,
-    userId: data.meta.userId,
-    userType: data.meta.userType,
+    userId,
+    userType,
     email: data.meta.email || email,
   };
 }

@@ -376,6 +376,8 @@ const ExcalidrawWrapper = () => {
       (elements: readonly any[], name?: string) => {
         const id = dashboardDiagramIdRef.current;
         if (!id || !import.meta.env.VITE_APP_DASHBOARD_API_URL) return;
+        // Safety: skip if within skip window (e.g. just loaded/deleted a diagram)
+        if (Date.now() < skipDashboardSaveUntilRef.current) return;
         // Skip saving empty canvases (no visible elements)
         const visibleElements = elements.filter(
           (el: any) => !el.isDeleted && el.type !== "cameraUpdate",

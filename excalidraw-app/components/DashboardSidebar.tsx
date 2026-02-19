@@ -344,10 +344,8 @@ function useDeleteDiagram(
         return;
       }
       try {
-        await deleteDiagram(id);
-        setDiagrams((prev) => prev.filter((d) => d.id !== id));
-        // If we just deleted the currently loaded diagram, switch to a new blank one
-        // so auto-save doesn't re-create the deleted diagram
+        // If deleting the currently loaded diagram, switch to a new blank diagram
+        // BEFORE the API call to prevent the debounced auto-save from re-creating it
         if (opts && id === opts.currentDiagramId && opts.dashboardDiagramIdRef && opts.excalidrawAPI) {
           const newId = `web-${crypto.randomUUID()}`;
           opts.dashboardDiagramIdRef.current = newId;
@@ -360,6 +358,8 @@ function useDeleteDiagram(
           });
           opts.onDiagramLoaded?.(newId);
         }
+        await deleteDiagram(id);
+        setDiagrams((prev) => prev.filter((d) => d.id !== id));
       } catch (err) {
         console.error("Failed to delete diagram:", err);
       }
@@ -454,6 +454,7 @@ function AllDiagramsTab({
           placeholder="Search diagrams..."
           value={searchQuery}
           onChange={(e) => handleSearch(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
           className="dashboard-search__input"
         />
       </div>
@@ -636,6 +637,7 @@ function ProjectEditForm({
           className="dashboard-project-form__input"
           value={name}
           onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
           placeholder="Project name"
           required
         />
@@ -646,6 +648,7 @@ function ProjectEditForm({
           className="dashboard-project-form__textarea"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
           placeholder="Optional description..."
           rows={3}
         />
@@ -670,6 +673,7 @@ function ProjectEditForm({
           className="dashboard-project-form__input"
           value={icon}
           onChange={(e) => setIcon(e.target.value)}
+          onKeyDown={(e) => e.stopPropagation()}
           placeholder={`e.g. \u{1F4C1}`}
         />
       </label>

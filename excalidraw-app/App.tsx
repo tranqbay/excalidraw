@@ -99,7 +99,7 @@ import type { DashboardSaveStatus } from "./components/DashboardSidebar";
 import { saveDiagram } from "./data/dashboard";
 import { queueSave, drainQueue } from "./data/dashboardOfflineQueue";
 import type { AuthState } from "./data/auth";
-import { getAuthState, logout as authLogout } from "./data/auth";
+import { getAuthState, login as authLogin, logout as authLogout } from "./data/auth";
 import {
   Provider,
   useAtom,
@@ -450,6 +450,24 @@ const ExcalidrawWrapper = () => {
   const collabError = useAtomValue(collabErrorIndicatorAtom);
 
   // Auth handlers
+  const [showLoginPopover, setShowLoginPopover] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  const handleLogin = useCallback(async (email: string, password: string) => {
+    setLoginLoading(true);
+    setLoginError(null);
+    try {
+      const state = await authLogin(email, password);
+      setAuthState(state);
+      setShowLoginPopover(false);
+    } catch (err: any) {
+      setLoginError(err.message || "Login failed");
+    } finally {
+      setLoginLoading(false);
+    }
+  }, []);
+
   const handleLogout = useCallback(() => {
     authLogout();
     setAuthState({ isAuthenticated: false, userId: null, userType: null, email: null });
@@ -1040,6 +1058,56 @@ const ExcalidrawWrapper = () => {
                     setShareDialogState({ isOpen: true, type: "share" })
                   }
                 />
+              )}
+              {!isMobile && import.meta.env.VITE_APP_AUTH_LOGIN_URL && !authState.isAuthenticated && (
+                <div className="top-right-login">
+                  <button
+                    className="top-right-login__btn"
+                    onClick={() => setShowLoginPopover((v) => !v)}
+                  >
+                    Log in
+                  </button>
+                  {showLoginPopover && (
+                    <form
+                      className="top-right-login__popover"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const form = e.currentTarget;
+                        const email = (form.elements.namedItem("email") as HTMLInputElement).value.trim();
+                        const password = (form.elements.namedItem("password") as HTMLInputElement).value;
+                        if (email && password) handleLogin(email, password);
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      <input
+                        name="email"
+                        type="email"
+                        placeholder="Email"
+                        autoComplete="email"
+                        autoFocus
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      <input
+                        name="password"
+                        type="password"
+                        placeholder="Password"
+                        autoComplete="current-password"
+                        onKeyDown={(e) => e.stopPropagation()}
+                      />
+                      {loginError && <span className="top-right-login__error">{loginError}</span>}
+                      <button type="submit" disabled={loginLoading}>
+                        {loginLoading ? "Logging in..." : "Log in"}
+                      </button>
+                    </form>
+                  )}
+                </div>
+              )}
+              {!isMobile && authState.isAuthenticated && (
+                <div className="top-right-user">
+                  <span className="top-right-user__email" title={authState.email || undefined}>
+                    {authState.email || "Logged in"}
+                  </span>
+                </div>
               )}
             </div>
           );

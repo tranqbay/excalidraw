@@ -110,7 +110,6 @@ export async function login(email: string, password: string): Promise<AuthState>
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ email, password }),
-    credentials: "include",
   });
 
   if (!res.ok) {
@@ -157,7 +156,6 @@ export async function refreshToken(): Promise<string | null> {
             "Content-Type": "application/json",
             Authorization: `Bearer ${currentRefreshToken}`,
           },
-          credentials: "include",
         });
 
         if (!res.ok) {

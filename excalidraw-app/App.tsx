@@ -97,6 +97,8 @@ import {
 } from "./components/DashboardSidebar";
 import type { DashboardSaveStatus } from "./components/DashboardSidebar";
 import { saveDiagram } from "./data/dashboard";
+import type { AuthState } from "./data/auth";
+import { getAuthState, login as authLogin, logout as authLogout } from "./data/auth";
 import {
   Provider,
   useAtom,
@@ -362,6 +364,8 @@ const ExcalidrawWrapper = () => {
   const skipDashboardSaveUntilRef = useRef(0);
   // Track element fingerprint to skip saves when elements haven't changed
   const lastSavedFingerprintRef = useRef("");
+  // Backoff: don't retry saves until this timestamp after a failure
+  const saveRetryAfterRef = useRef(0);
   if (!dashboardDiagramIdRef.current && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     const stored = localStorage.getItem("dashboard-diagram-id");
     dashboardDiagramIdRef.current = stored || `web-${crypto.randomUUID()}`;
@@ -371,6 +375,11 @@ const ExcalidrawWrapper = () => {
   }
   const [dashboardSaveStatus, setDashboardSaveStatus] = useState<DashboardSaveStatus>("idle");
   const saveStatusTimeoutRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // Auth state — initialized from cookies
+  const [authState, setAuthState] = useState<AuthState>(() => getAuthState());
+  // Track whether current diagram is read-only (shared with read permission)
+  const readOnlyDiagramIdRef = useRef<string | null>(null);
   const debouncedDashboardSave = useRef(
     debounce(
       (elements: readonly any[], name?: string) => {
@@ -378,6 +387,8 @@ const ExcalidrawWrapper = () => {
         if (!id || !import.meta.env.VITE_APP_DASHBOARD_API_URL) return;
         // Safety: skip if within skip window (e.g. just loaded/deleted a diagram)
         if (Date.now() < skipDashboardSaveUntilRef.current) return;
+        // Backoff: skip if within error cooldown period
+        if (Date.now() < saveRetryAfterRef.current) return;
         // Skip saving empty canvases (no visible elements)
         const visibleElements = elements.filter(
           (el: any) => !el.isDeleted && el.type !== "cameraUpdate",
@@ -391,11 +402,13 @@ const ExcalidrawWrapper = () => {
         saveDiagram(id, elements, { title: name })
           .then(() => {
             lastSavedFingerprintRef.current = fingerprint;
+            saveRetryAfterRef.current = 0; // Reset backoff on success
             setDashboardSaveStatus("saved");
             saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 2000);
           })
           .catch((err) => {
             console.warn("Dashboard auto-save failed:", err);
+            saveRetryAfterRef.current = Date.now() + 30000; // 30s backoff after failure
             setDashboardSaveStatus("error");
             saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
           });
@@ -403,6 +416,77 @@ const ExcalidrawWrapper = () => {
       5000, // 5 second debounce for server saves
     ),
   ).current;
+
+  // Auth handlers
+  const handleLogin = useCallback(async (email: string, password: string) => {
+    const state = await authLogin(email, password);
+    setAuthState(state);
+  }, []);
+
+  const handleLogout = useCallback(() => {
+    authLogout();
+    setAuthState({ isAuthenticated: false, userId: null, userType: null, email: null });
+  }, []);
+
+  // Called when a read-only shared diagram is loaded
+  const handleReadOnlyDiagram = useCallback((diagramId: string, _permission: string) => {
+    readOnlyDiagramIdRef.current = diagramId;
+    setDashboardSaveStatus("readonly");
+    // Cancel any pending dashboard save
+    debouncedDashboardSave.cancel();
+  }, [debouncedDashboardSave]);
+
+  // Fork: create a copy of the current read-only diagram as the user's own
+  const handleForkDiagram = useCallback(() => {
+    if (!excalidrawAPI || !dashboardDiagramIdRef.current) return;
+
+    const elements = excalidrawAPI.getSceneElements();
+    const appState = excalidrawAPI.getAppState();
+
+    // Create a new diagram ID for the fork
+    const newId = `web-${crypto.randomUUID()}`;
+    const originalTitle = appState.name || "";
+    const forkTitle = originalTitle ? `Copy of ${originalTitle}` : "";
+
+    // Switch to the new diagram
+    dashboardDiagramIdRef.current = newId;
+    localStorage.setItem("dashboard-diagram-id", newId);
+    readOnlyDiagramIdRef.current = null;
+
+    // Reset fingerprint so next save goes through
+    lastSavedFingerprintRef.current = "";
+    skipDashboardSaveUntilRef.current = 0;
+    saveRetryAfterRef.current = 0;
+
+    // Update the scene name if we have a title
+    if (forkTitle) {
+      excalidrawAPI.updateScene({
+        appState: { name: forkTitle },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    }
+
+    // Save immediately to create the fork on the server
+    setDashboardSaveStatus("saving");
+    saveDiagram(newId, elements, { title: forkTitle || undefined })
+      .then(() => {
+        const visibleElements = Array.from(elements).filter(
+          (el: any) => !el.isDeleted && el.type !== "cameraUpdate",
+        );
+        lastSavedFingerprintRef.current = visibleElements
+          .map((el: any) => `${el.id}:${el.version}`)
+          .join(",");
+        setDashboardSaveStatus("saved");
+        if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+        saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 2000);
+      })
+      .catch((err) => {
+        console.warn("Fork save failed:", err);
+        setDashboardSaveStatus("error");
+        if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+        saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
+      });
+  }, [excalidrawAPI, debouncedDashboardSave]);
 
   useEffect(() => {
     trackEvent("load", "frame", getFrame());
@@ -711,8 +795,10 @@ const ExcalidrawWrapper = () => {
       });
     }
 
-    // Auto-save to dashboard API (debounced)
-    if (Date.now() < skipDashboardSaveUntilRef.current) {
+    // Auto-save to dashboard API (debounced) — skip if readonly
+    if (readOnlyDiagramIdRef.current) {
+      debouncedDashboardSave.cancel();
+    } else if (Date.now() < skipDashboardSaveUntilRef.current) {
       debouncedDashboardSave.cancel();
     } else {
       debouncedDashboardSave(elements, appState.name || undefined);
@@ -994,12 +1080,23 @@ const ExcalidrawWrapper = () => {
             flushDashboardSave={() => debouncedDashboardSave.flush()}
             skipNextDashboardSave={(elements?: readonly any[]) => {
               skipDashboardSaveUntilRef.current = Date.now() + 6000;
+              saveRetryAfterRef.current = 0; // Reset backoff when switching diagrams
+              if (readOnlyDiagramIdRef.current) {
+                readOnlyDiagramIdRef.current = null; // Clear readonly state
+                setDashboardSaveStatus("idle");
+              }
               if (elements?.length) {
                 const visible = elements.filter((el: any) => !el.isDeleted && el.type !== "cameraUpdate");
                 lastSavedFingerprintRef.current = visible.map((el: any) => `${el.id}:${el.version}`).join(",");
               }
             }}
             dashboardSaveStatus={dashboardSaveStatus}
+            auth={authState}
+            collabAPI={collabAPI}
+            onLogin={handleLogin}
+            onLogout={handleLogout}
+            onForkDiagram={handleForkDiagram}
+            onReadOnlyDiagram={handleReadOnlyDiagram}
           />
         )}
 

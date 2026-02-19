@@ -61,6 +61,11 @@ ENV VITE_APP_PLUS_APP=https://app.excalidraw.com
 ENV VITE_APP_WS_SERVER_URL=""
 ENV VITE_APP_FIREBASE_CONFIG='{"apiKey":"AIzaSyAd15pYlMci_xIp9ko6wkEsDzAAA0Dn0RU","authDomain":"excalidraw-room-persistence.firebaseapp.com","databaseURL":"https://excalidraw-room-persistence.firebaseio.com","projectId":"excalidraw-room-persistence","storageBucket":"excalidraw-room-persistence.appspot.com","messagingSenderId":"654800341332","appId":"1:654800341332:web:4a692de832b55bd57ce0c1"}'
 ENV VITE_APP_DISABLE_TRACKING=""
+ENV VITE_APP_STORAGE_BACKEND="http"
+ENV VITE_APP_HTTP_STORAGE_BACKEND_URL=""
+ENV VITE_APP_DASHBOARD_API_URL=""
+ENV VITE_APP_AUTH_LOGIN_URL=""
+ENV VITE_APP_AUTH_REFRESH_URL=""
 
 COPY --from=build /opt/node_app/excalidraw-app/build /usr/share/nginx/html
 COPY launcher.py /

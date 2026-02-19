@@ -83,6 +83,7 @@ import type {
   ReconciledExcalidrawElement,
   RemoteExcalidrawElement,
 } from "@excalidraw/excalidraw/data/reconcile";
+import { updateDiagramMeta } from "../data/dashboard";
 
 export const collabAPIAtom = atom<CollabAPI | null>(null);
 export const isCollaboratingAtom = atom(false);
@@ -344,6 +345,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
   };
 
   stopCollaboration = (keepRemoteState = true) => {
+    // Clear collab link from dashboard diagram meta
+    if (import.meta.env.VITE_APP_DASHBOARD_API_URL) {
+      const dashboardId = localStorage.getItem("dashboard-diagram-id");
+      if (dashboardId) {
+        updateDiagramMeta(dashboardId, { collabLink: null }).catch(
+          (err) => console.warn("Failed to clear collab link:", err),
+        );
+      }
+    }
+
     this.queueBroadcastAllElements.cancel();
     this.queueSaveToFirebase.cancel();
     this.loadImageFiles.cancel();
@@ -681,6 +692,16 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     this.initializeIdleDetector();
 
     this.setActiveRoomLink(window.location.href);
+
+    // Save collab link to dashboard diagram meta so shared users can join
+    if (import.meta.env.VITE_APP_DASHBOARD_API_URL) {
+      const dashboardId = localStorage.getItem("dashboard-diagram-id");
+      if (dashboardId) {
+        updateDiagramMeta(dashboardId, { collabLink: window.location.href }).catch(
+          (err) => console.warn("Failed to save collab link:", err),
+        );
+      }
+    }
 
     return scenePromise;
   };

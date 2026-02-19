@@ -3,7 +3,12 @@ import { Sidebar } from "@excalidraw/excalidraw";
 import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
 import { restore } from "@excalidraw/excalidraw/data/restore";
 import { CaptureUpdateAction } from "@excalidraw/excalidraw";
-import type { DiagramSummary, ProjectSummary, ProjectMetadata } from "../data/dashboard";
+import type {
+  DiagramSummary,
+  ProjectSummary,
+  ProjectMetadata,
+  ShareEntry,
+} from "../data/dashboard";
 import {
   listDiagrams,
   searchDiagrams,
@@ -15,12 +20,25 @@ import {
   updateProject,
   renameProject,
   deleteProject,
+  setDiagramVisibility,
+  setProjectVisibility,
+  listDiagramShares,
+  listProjectShares,
+  shareDiagram,
+  unshareDiagram,
+  shareProject,
+  unshareProject,
+  lookupUser,
 } from "../data/dashboard";
+import type { AuthState } from "../data/auth";
+import type { CollabAPI } from "../collab/Collab";
+import { getCollaborationLinkData } from "../data";
 
 import "./DashboardSidebar.scss";
 
 export const DASHBOARD_SIDEBAR_NAME = "dashboard";
 const DASHBOARD_TAB_ALL = "all";
+const DASHBOARD_TAB_MINE = "mine";
 const DASHBOARD_TAB_PROJECTS = "projects";
 
 function formatDate(iso: string): string {
@@ -37,38 +55,424 @@ function formatDate(iso: string): string {
   return d.toLocaleDateString();
 }
 
+// =============================================================
+// Login Form
+// =============================================================
+
+function LoginForm({
+  onLogin,
+  onCancel,
+}: {
+  onLogin: (email: string, password: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const emailRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    emailRef.current?.focus();
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email.trim() || !password) return;
+    setLoading(true);
+    setError(null);
+    try {
+      await onLogin(email.trim(), password);
+    } catch (err: any) {
+      setError(err.message || "Login failed");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <form className="dashboard-login-form" onSubmit={handleSubmit}>
+      <span className="dashboard-login-form__label">Email</span>
+      <input
+        ref={emailRef}
+        className="dashboard-login-form__input"
+        type="email"
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
+        placeholder="admin@example.com"
+        autoComplete="email"
+      />
+      <span className="dashboard-login-form__label">Password</span>
+      <input
+        className="dashboard-login-form__input"
+        type="password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+        onKeyDown={(e) => e.stopPropagation()}
+        autoComplete="current-password"
+      />
+      {error && <span className="dashboard-login-form__error">{error}</span>}
+      <div className="dashboard-login-form__actions">
+        <button
+          type="button"
+          className="dashboard-login-form__cancel"
+          onClick={onCancel}
+          disabled={loading}
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          className="dashboard-login-form__submit"
+          disabled={loading || !email.trim() || !password}
+        >
+          {loading ? "Logging in..." : "Log in"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// =============================================================
+// Share Dialog
+// =============================================================
+
+function ShareDialog({
+  resourceType,
+  resourceId,
+  resourceTitle,
+  visibility,
+  onClose,
+  onVisibilityChange,
+}: {
+  resourceType: "diagram" | "project";
+  resourceId: string;
+  resourceTitle: string;
+  visibility: "public" | "private";
+  onClose: () => void;
+  onVisibilityChange: (vis: "public" | "private") => void;
+}) {
+  const [shares, setShares] = useState<ShareEntry[]>([]);
+  const [email, setEmail] = useState("");
+  const [permission, setPermission] = useState<"read" | "write">("write");
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fetchShares = resourceType === "project" ? listProjectShares : listDiagramShares;
+    fetchShares(resourceId).then(setShares).catch(() => {});
+  }, [resourceId, resourceType]);
+
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  const handleAdd = async () => {
+    if (!email.trim()) return;
+    setLoading(true);
+    setError(null);
+    try {
+      // Try lookup by email first
+      const user = await lookupUser(email.trim());
+      const targetId = user?.userId || email.trim();
+      const doShare = resourceType === "project" ? shareProject : shareDiagram;
+      const doListShares = resourceType === "project" ? listProjectShares : listDiagramShares;
+      await doShare(resourceId, targetId, permission);
+      const updated = await doListShares(resourceId);
+      setShares(updated);
+      setEmail("");
+    } catch (err: any) {
+      setError(err.message || "Failed to share");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRevoke = async (userId: string) => {
+    try {
+      const doUnshare = resourceType === "project" ? unshareProject : unshareDiagram;
+      await doUnshare(resourceId, userId);
+      setShares((prev) => prev.filter((s) => s.sharedWith !== userId));
+    } catch (err) {
+      console.error("Revoke failed:", err);
+    }
+  };
+
+  const handleToggleVisibility = async () => {
+    const newVis = visibility === "public" ? "private" : "public";
+    try {
+      const doSetVis = resourceType === "project" ? setProjectVisibility : setDiagramVisibility;
+      await doSetVis(resourceId, newVis);
+      onVisibilityChange(newVis);
+    } catch (err) {
+      console.error("Toggle visibility failed:", err);
+    }
+  };
+
+  return (
+    <div
+      ref={dialogRef}
+      className="dashboard-share-dialog"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="dashboard-share-dialog__title">
+        Share "{resourceTitle}"
+        <button className="dashboard-share-dialog__close" onClick={onClose}>
+          &times;
+        </button>
+      </div>
+
+      <div className="dashboard-share-dialog__add">
+        <input
+          type="text"
+          placeholder="Enter email or user ID..."
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+          onKeyDown={(e) => {
+            e.stopPropagation();
+            if (e.key === "Enter") handleAdd();
+          }}
+        />
+        <button
+          className="dashboard-share-dialog__add-btn"
+          onClick={handleAdd}
+          disabled={loading || !email.trim()}
+        >
+          + Share
+        </button>
+      </div>
+
+      <div className="dashboard-share-dialog__perm-select">
+        <label>
+          <input
+            type="radio"
+            name="share-perm"
+            checked={permission === "read"}
+            onChange={() => setPermission("read")}
+          />
+          Read
+        </label>
+        <label>
+          <input
+            type="radio"
+            name="share-perm"
+            checked={permission === "write"}
+            onChange={() => setPermission("write")}
+          />
+          Write
+        </label>
+      </div>
+
+      {error && <span className="dashboard-login-form__error">{error}</span>}
+
+      {shares.length > 0 && (
+        <div className="dashboard-share-dialog__list">
+          {shares.map((s) => (
+            <div key={s.id} className="dashboard-share-dialog__item">
+              <span className="dashboard-share-dialog__item-info">
+                {s.sharedWith}
+              </span>
+              <span className="dashboard-share-dialog__item-perm">
+                {s.permission}
+              </span>
+              <button
+                className="dashboard-share-dialog__item-revoke"
+                onClick={() => handleRevoke(s.sharedWith)}
+              >
+                Revoke
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div className="dashboard-share-dialog__visibility">
+        <span>
+          Visibility: {visibility === "private" ? "Private \uD83D\uDD12" : "Public"}
+        </span>
+        <button
+          className="dashboard-share-dialog__visibility-btn"
+          onClick={handleToggleVisibility}
+        >
+          Make {visibility === "public" ? "private" : "public"}
+        </button>
+      </div>
+      <div className="dashboard-share-dialog__visibility-note">
+        {visibility === "public"
+          ? "Public diagrams are visible to everyone, even without login."
+          : "Only you and shared people can see this."}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================
+// Project Picker (unchanged)
+// =============================================================
+
+function ProjectPicker({
+  projects,
+  currentProject,
+  onSelect,
+  onClear,
+  onClose,
+}: {
+  projects: ProjectSummary[];
+  currentProject: string | null;
+  onSelect: (projectName: string) => void;
+  onClear: () => void;
+  onClose: () => void;
+}) {
+  const [filter, setFilter] = useState("");
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const filterInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    filterInputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  const filtered = projects.filter((p) =>
+    p.name.toLowerCase().includes(filter.toLowerCase()),
+  );
+  const exactMatch = projects.some(
+    (p) => p.name.toLowerCase() === filter.trim().toLowerCase(),
+  );
+
+  return (
+    <div
+      ref={pickerRef}
+      className="dashboard-project-picker"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <input
+        ref={filterInputRef}
+        className="dashboard-project-picker__search"
+        type="text"
+        placeholder="Search or create..."
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        onKeyDown={(e) => {
+          e.stopPropagation();
+          if (e.key === "Enter" && filter.trim()) {
+            onSelect(filter.trim());
+          }
+        }}
+      />
+      <div className="dashboard-project-picker__list">
+        {filtered.map((p) => (
+          <button
+            key={p.name}
+            className={`dashboard-project-picker__item${p.name === currentProject ? " dashboard-project-picker__item--active" : ""}`}
+            onClick={() => onSelect(p.name)}
+          >
+            <span
+              className="dashboard-project-card__dot"
+              style={{ background: p.color || "#6554c0" }}
+            />
+            {p.icon && <span className="dashboard-project-picker__icon">{p.icon}</span>}
+            <span className="dashboard-project-picker__name">{p.name}</span>
+          </button>
+        ))}
+        {filter.trim() && !exactMatch && (
+          <button
+            className="dashboard-project-picker__item dashboard-project-picker__item--create"
+            onClick={() => onSelect(filter.trim())}
+          >
+            + Create "{filter.trim()}"
+          </button>
+        )}
+        {filtered.length === 0 && !filter.trim() && (
+          <div className="dashboard-project-picker__empty">No projects</div>
+        )}
+      </div>
+      {currentProject && (
+        <button
+          className="dashboard-project-picker__clear"
+          onClick={onClear}
+        >
+          Clear project
+        </button>
+      )}
+    </div>
+  );
+}
+
+// =============================================================
+// DiagramCard — with visibility/share/live indicators
+// =============================================================
+
 function DiagramCard({
   diagram,
   onLoad,
   onDelete,
   onRename,
   onSetProject,
+  onClearProject,
+  onTogglePin,
   currentDiagramId,
+  auth,
+  onDiagramUpdate,
 }: {
   diagram: DiagramSummary;
   onLoad: (diagram: DiagramSummary) => Promise<void>;
   onDelete: (id: string) => void;
   onRename: (id: string, title: string) => Promise<void>;
   onSetProject: (id: string, project: string) => Promise<void>;
+  onClearProject: (id: string) => Promise<void>;
+  onTogglePin: (id: string, pinned: boolean) => Promise<void>;
   currentDiagramId: string | null;
+  auth?: AuthState;
+  onDiagramUpdate?: (id: string, updates: Partial<DiagramSummary>) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isRenaming, setIsRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState("");
-  const [showProjectInput, setShowProjectInput] = useState(false);
-  const [projectValue, setProjectValue] = useState("");
-  const [projectSuggestions, setProjectSuggestions] = useState<string[]>([]);
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
+  const [pickerProjects, setPickerProjects] = useState<ProjectSummary[]>([]);
+  const [showShareDialog, setShowShareDialog] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const projectInputRef = useRef<HTMLInputElement>(null);
   const renameSubmittedRef = useRef(false);
-  const projectSubmittedRef = useRef(false);
 
   const isCurrent = diagram.id === currentDiagramId;
+  const isOwner = auth?.isAuthenticated && auth.userId === diagram.ownerId;
+  const isLegacy = !diagram.ownerId;
+  const isSharedWithMe = auth?.isAuthenticated && !isOwner && !isLegacy && diagram.ownerId !== null;
 
-  // Close menu on outside click or Escape
   useEffect(() => {
     if (!showMenu) return;
     const handleMouseDown = (e: MouseEvent) => {
@@ -90,7 +494,6 @@ function DiagramCard({
     };
   }, [showMenu]);
 
-  // Auto-focus rename input
   useEffect(() => {
     if (isRenaming && renameInputRef.current) {
       renameInputRef.current.focus();
@@ -98,18 +501,16 @@ function DiagramCard({
     }
   }, [isRenaming]);
 
-  // Auto-focus project input and fetch suggestions
   useEffect(() => {
-    if (showProjectInput) {
-      projectInputRef.current?.focus();
+    if (showProjectPicker) {
       listProjects()
-        .then((projects) => setProjectSuggestions(projects.map((p) => p.name)))
+        .then(setPickerProjects)
         .catch(() => {});
     }
-  }, [showProjectInput]);
+  }, [showProjectPicker]);
 
   const handleClick = async () => {
-    if (loading || isRenaming || showProjectInput || showMenu) return;
+    if (loading || isRenaming || showProjectPicker || showMenu || showShareDialog) return;
     setLoading(true);
     try {
       await onLoad(diagram);
@@ -121,31 +522,42 @@ function DiagramCard({
   const handleRenameSubmit = async () => {
     if (renameSubmittedRef.current) return;
     renameSubmittedRef.current = true;
-    const trimmed = renameValue.trim();
-    if (trimmed && trimmed !== (diagram.title || "")) {
-      await onRename(diagram.id, trimmed);
+    try {
+      const trimmed = renameValue.trim();
+      if (trimmed && trimmed !== (diagram.title || "")) {
+        await onRename(diagram.id, trimmed);
+      }
+    } catch (err) {
+      console.error("Rename failed:", err);
+    } finally {
+      setIsRenaming(false);
+      renameSubmittedRef.current = false;
     }
-    setIsRenaming(false);
-    renameSubmittedRef.current = false;
   };
 
-  const handleProjectSubmit = async () => {
-    if (projectSubmittedRef.current) return;
-    projectSubmittedRef.current = true;
-    const trimmed = projectValue.trim();
-    if (trimmed) {
-      await onSetProject(diagram.id, trimmed);
+  const handlePickerSelect = async (projectName: string) => {
+    setShowProjectPicker(false);
+    try {
+      await onSetProject(diagram.id, projectName);
+    } catch (err) {
+      console.error("Set project failed:", err);
     }
-    setShowProjectInput(false);
-    setProjectValue("");
-    projectSubmittedRef.current = false;
+  };
+
+  const handlePickerClear = async () => {
+    setShowProjectPicker(false);
+    try {
+      await onClearProject(diagram.id);
+    } catch (err) {
+      console.error("Clear project failed:", err);
+    }
   };
 
   const cardClass = [
     "dashboard-diagram-card",
     loading && "dashboard-diagram-card--loading",
     isCurrent && "dashboard-diagram-card--current",
-    (showMenu || showProjectInput) && "dashboard-diagram-card--menu-open",
+    (showMenu || showProjectPicker || showShareDialog) && "dashboard-diagram-card--menu-open",
   ].filter(Boolean).join(" ");
 
   return (
@@ -167,7 +579,16 @@ function DiagramCard({
           />
         ) : (
           <span className="dashboard-diagram-card__title">
+            {diagram.pinned && <span className="dashboard-pin-icon" title="Pinned">&#x1F4CC;</span>}
+            {diagram.visibility === "private" && <span className="dashboard-visibility-icon" title="Private">&#x1F512;</span>}
+            {isSharedWithMe && <span className="dashboard-visibility-icon" title="Shared with you">&#x1F465;</span>}
             {diagram.title || "Untitled"}
+            {diagram.collabLink && (
+              <span className="dashboard-live-badge" title="Live collaboration active">
+                <span className="dashboard-live-badge__dot" />
+                Live
+              </span>
+            )}
           </span>
         )}
         <button
@@ -181,36 +602,26 @@ function DiagramCard({
           ...
         </button>
       </div>
-      {showProjectInput && (
-        <div
-          className="dashboard-diagram-card__project-input-wrap"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <input
-            ref={projectInputRef}
-            className="dashboard-diagram-card__rename-input"
-            placeholder="Project name..."
-            value={projectValue}
-            onChange={(e) => setProjectValue(e.target.value)}
-            onKeyDown={(e) => {
-              e.stopPropagation();
-              if (e.key === "Enter") handleProjectSubmit();
-              if (e.key === "Escape") {
-                setShowProjectInput(false);
-                setProjectValue("");
-              }
-            }}
-            onBlur={handleProjectSubmit}
-            list={`project-suggestions-${diagram.id}`}
-          />
-          {projectSuggestions.length > 0 && (
-            <datalist id={`project-suggestions-${diagram.id}`}>
-              {projectSuggestions.map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
-          )}
-        </div>
+      {showProjectPicker && (
+        <ProjectPicker
+          projects={pickerProjects}
+          currentProject={diagram.project || null}
+          onSelect={handlePickerSelect}
+          onClear={handlePickerClear}
+          onClose={() => setShowProjectPicker(false)}
+        />
+      )}
+      {showShareDialog && isOwner && (
+        <ShareDialog
+          resourceType="diagram"
+          resourceId={diagram.id}
+          resourceTitle={diagram.title || "Untitled"}
+          visibility={diagram.visibility}
+          onClose={() => setShowShareDialog(false)}
+          onVisibilityChange={(vis) => {
+            onDiagramUpdate?.(diagram.id, { visibility: vis });
+          }}
+        />
       )}
       <div className="dashboard-diagram-card__meta">
         {diagram.project && (
@@ -225,6 +636,11 @@ function DiagramCard({
           {formatDate(diagram.updatedAt)}
         </span>
       </div>
+      {isSharedWithMe && diagram.ownerId && (
+        <div className="dashboard-diagram-card__shared-by">
+          shared by {diagram.ownerId}
+        </div>
+      )}
       {diagram.tags.length > 0 && (
         <div className="dashboard-diagram-card__tags">
           {diagram.tags.map((tag) => (
@@ -248,52 +664,100 @@ function DiagramCard({
           >
             Open link
           </button>
+          {(isOwner || isLegacy) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                setRenameValue(diagram.title || "");
+                setIsRenaming(true);
+              }}
+            >
+              Rename
+            </button>
+          )}
           <button
             onClick={(e) => {
               e.stopPropagation();
               setShowMenu(false);
-              setRenameValue(diagram.title || "");
-              setIsRenaming(true);
+              onTogglePin(diagram.id, !diagram.pinned);
             }}
           >
-            Rename
+            {diagram.pinned ? "Unpin" : "Pin to top"}
           </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowMenu(false);
-              setProjectValue(diagram.project || "");
-              setShowProjectInput(true);
-            }}
-          >
-            Set project
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(diagram.id);
-              setShowMenu(false);
-            }}
-            className="dashboard-diagram-card__delete"
-          >
-            Delete
-          </button>
+          {(isOwner || isLegacy) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                setShowProjectPicker(true);
+              }}
+            >
+              Set project
+            </button>
+          )}
+          {isOwner && (
+            <>
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  try {
+                    const newVis = diagram.visibility === "public" ? "private" : "public";
+                    await setDiagramVisibility(diagram.id, newVis);
+                    onDiagramUpdate?.(diagram.id, { visibility: newVis });
+                  } catch (err) {
+                    console.error("Toggle visibility failed:", err);
+                  }
+                }}
+              >
+                Make {diagram.visibility === "public" ? "private" : "public"}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  setShowShareDialog(true);
+                }}
+              >
+                Share
+              </button>
+            </>
+          )}
+          {(isOwner || isLegacy) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onDelete(diagram.id);
+                setShowMenu(false);
+              }}
+              className="dashboard-diagram-card__delete"
+            >
+              Delete
+            </button>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+// =============================================================
+// Hooks
+// =============================================================
+
 function useLoadDiagram(
   excalidrawAPI: ExcalidrawImperativeAPI,
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>,
   flushDashboardSave?: () => void,
   skipNextDashboardSave?: (elements?: readonly any[]) => void,
+  onReadOnlyDiagram?: (diagramId: string, permission: string) => void,
+  collabAPI?: CollabAPI | null,
+  auth?: AuthState,
 ) {
   return useCallback(
     async (diagram: DiagramSummary) => {
       try {
-        // Flush any pending auto-save for the current diagram before switching
         flushDashboardSave?.();
 
         const data = await loadDiagramElements(diagram.id);
@@ -305,26 +769,63 @@ function useLoadDiagram(
           null,
           { repairBindings: true },
         );
-        // Update the diagram ID ref so auto-save updates this diagram
         if (dashboardDiagramIdRef) {
           dashboardDiagramIdRef.current = diagram.id;
           localStorage.setItem("dashboard-diagram-id", diagram.id);
         }
-        // Skip the auto-save triggered by updateScene and set fingerprint for loaded elements
+        // skipNextDashboardSave MUST run before onReadOnlyDiagram:
+        // it clears any previous readonly state, then onReadOnlyDiagram
+        // re-sets it if needed. Reversed order would immediately undo readonly.
         skipNextDashboardSave?.(restored.elements);
+
+        if (data.permission === "read") {
+          onReadOnlyDiagram?.(diagram.id, "read");
+        }
+
+        const currentOpenSidebar = excalidrawAPI.getAppState().openSidebar;
         excalidrawAPI.updateScene({
           elements: restored.elements,
           appState: {
             ...restored.appState,
             name: diagram.title || "Untitled",
+            openSidebar: currentOpenSidebar,
           },
           captureUpdate: CaptureUpdateAction.IMMEDIATELY,
         });
+
+        // --- Collab edge cases ---
+        if (diagram.collabLink && collabAPI) {
+          const isOwner = auth?.userId && diagram.ownerId === auth.userId;
+          const isLegacy = !diagram.ownerId;
+
+          if ((isOwner || isLegacy) && !collabAPI.isCollaborating()) {
+            // Stale collab link: owner loaded their diagram but is not in a session.
+            // Clear the orphaned collabLink so the "Live" badge disappears.
+            updateDiagramMeta(diagram.id, { collabLink: null }).catch(
+              (err) => console.warn("Failed to clear stale collab link:", err),
+            );
+          } else if (data.permission === "write" && !isOwner && !collabAPI.isCollaborating()) {
+            // Shared user (write) loading a diagram with an active collab session.
+            // Prompt to join live collaboration.
+            const roomData = getCollaborationLinkData(diagram.collabLink);
+            if (roomData) {
+              const join = window.confirm(
+                "A live collaboration session is active on this diagram. Join?",
+              );
+              if (join) {
+                window.history.pushState({}, "", diagram.collabLink);
+                collabAPI.startCollaboration(roomData);
+              }
+            }
+          }
+          // Read-only shared users: no join prompt — they already got
+          // onReadOnlyDiagram above, which shows the fork-on-edit UI.
+        }
       } catch (err) {
         console.error("Failed to load diagram:", err);
       }
     },
-    [excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave],
+    [excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, onReadOnlyDiagram, collabAPI, auth],
   );
 }
 
@@ -345,16 +846,15 @@ function useDeleteDiagram(
         return;
       }
       try {
-        // If deleting the currently loaded diagram, switch to a new blank diagram
-        // BEFORE the API call to prevent the debounced auto-save from re-creating it
         if (opts && id === opts.currentDiagramId && opts.dashboardDiagramIdRef && opts.excalidrawAPI) {
           const newId = `web-${crypto.randomUUID()}`;
           opts.dashboardDiagramIdRef.current = newId;
           localStorage.setItem("dashboard-diagram-id", newId);
           opts.skipNextDashboardSave?.([]);
+          const currentOpenSidebar = opts.excalidrawAPI.getAppState().openSidebar;
           opts.excalidrawAPI.updateScene({
             elements: [],
-            appState: { name: "" },
+            appState: { name: "", openSidebar: currentOpenSidebar },
             captureUpdate: CaptureUpdateAction.IMMEDIATELY,
           });
           opts.onDiagramLoaded?.(newId);
@@ -369,13 +869,21 @@ function useDeleteDiagram(
   );
 }
 
-function AllDiagramsTab({
+// =============================================================
+// DiagramsTab — shared between All and Mine
+// =============================================================
+
+function DiagramsTab({
   excalidrawAPI,
   dashboardDiagramIdRef,
   flushDashboardSave,
   skipNextDashboardSave,
   currentDiagramId,
   onDiagramLoaded,
+  auth,
+  collabAPI,
+  mineOnly,
+  onReadOnlyDiagram,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
@@ -383,29 +891,46 @@ function AllDiagramsTab({
   skipNextDashboardSave?: (elements?: readonly any[]) => void;
   currentDiagramId: string | null;
   onDiagramLoaded: (id: string) => void;
+  auth?: AuthState;
+  collabAPI?: CollabAPI | null;
+  mineOnly?: boolean;
+  onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
 }) {
+  const PAGE_SIZE = 50;
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchTimeout, setSearchTimeout] = useState<ReturnType<
     typeof setTimeout
   > | null>(null);
 
-  const fetchDiagrams = useCallback(async (query?: string) => {
-    setLoading(true);
+  const fetchDiagrams = useCallback(async (query?: string, append = false, appendOffset = 0) => {
+    if (append) {
+      setLoadingMore(true);
+    } else {
+      setLoading(true);
+    }
     setError(null);
     try {
       const results = query
         ? await searchDiagrams({ query })
-        : await listDiagrams({ limit: 50 });
-      setDiagrams(results);
+        : await listDiagrams({ limit: PAGE_SIZE, offset: appendOffset, mine: mineOnly });
+      if (append) {
+        setDiagrams((prev) => [...prev, ...results]);
+      } else {
+        setDiagrams(results);
+      }
+      setHasMore(!query && results.length === PAGE_SIZE);
     } catch (err: any) {
       setError(err.message || "Failed to load diagrams");
     } finally {
       setLoading(false);
+      setLoadingMore(false);
     }
-  }, []);
+  }, [mineOnly]);
 
   useEffect(() => {
     fetchDiagrams();
@@ -423,7 +948,11 @@ function AllDiagramsTab({
     [fetchDiagrams, searchTimeout],
   );
 
-  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
+  const handleLoadMore = useCallback(() => {
+    fetchDiagrams(undefined, true, diagrams.length);
+  }, [fetchDiagrams, diagrams.length]);
+
+  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, onReadOnlyDiagram, collabAPI, auth);
   const handleLoad = useCallback(async (diagram: DiagramSummary) => {
     await baseHandleLoad(diagram);
     onDiagramLoaded(diagram.id);
@@ -434,7 +963,7 @@ function AllDiagramsTab({
     flushDashboardSave,
     skipNextDashboardSave,
     excalidrawAPI,
-    onDiagramLoaded: onDiagramLoaded,
+    onDiagramLoaded,
   });
 
   const handleRename = useCallback(async (id: string, title: string) => {
@@ -447,12 +976,29 @@ function AllDiagramsTab({
     setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project } : d));
   }, []);
 
+  const handleClearProject = useCallback(async (id: string) => {
+    await updateDiagramMeta(id, { project: "" });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project: "" } : d));
+  }, []);
+
+  const handleTogglePin = useCallback(async (id: string, pinned: boolean) => {
+    await updateDiagramMeta(id, { pinned });
+    setDiagrams((prev) => {
+      const updated = prev.map((d) => d.id === id ? { ...d, pinned } : d);
+      return updated.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+    });
+  }, []);
+
+  const handleDiagramUpdate = useCallback((id: string, updates: Partial<DiagramSummary>) => {
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, ...updates } : d));
+  }, []);
+
   return (
     <div className="dashboard-all-tab">
       <div className="dashboard-search">
         <input
           type="text"
-          placeholder="Search diagrams..."
+          placeholder={mineOnly ? "Search my diagrams..." : "Search diagrams..."}
           value={searchQuery}
           onChange={(e) => handleSearch(e.target.value)}
           onKeyDown={(e) => e.stopPropagation()}
@@ -466,7 +1012,11 @@ function AllDiagramsTab({
         {error && <div className="dashboard-error">{error}</div>}
         {!loading && !error && diagrams.length === 0 && (
           <div className="dashboard-empty">
-            {searchQuery ? "No diagrams found" : "No diagrams yet"}
+            {searchQuery
+              ? "No diagrams found"
+              : mineOnly
+                ? "No diagrams yet. Create one with + New."
+                : "No diagrams yet"}
           </div>
         )}
         {diagrams.map((diagram) => (
@@ -477,13 +1027,30 @@ function AllDiagramsTab({
             onDelete={handleDelete}
             onRename={handleRename}
             onSetProject={handleSetProject}
+            onClearProject={handleClearProject}
+            onTogglePin={handleTogglePin}
             currentDiagramId={currentDiagramId}
+            auth={auth}
+            onDiagramUpdate={handleDiagramUpdate}
           />
         ))}
+        {hasMore && !loading && (
+          <button
+            className="dashboard-load-more"
+            onClick={handleLoadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "Loading..." : "Load more"}
+          </button>
+        )}
       </div>
     </div>
   );
 }
+
+// =============================================================
+// Project components (ProjectCard, ProjectEditForm, ProjectsTab)
+// =============================================================
 
 const PROJECT_COLORS = [
   "#6554c0",
@@ -500,15 +1067,22 @@ function ProjectCard({
   onSelect,
   onEdit,
   onDelete,
+  onTogglePin,
+  auth,
 }: {
   project: ProjectSummary;
   onSelect: (project: ProjectSummary) => void;
   onEdit: (project: ProjectSummary) => void;
   onDelete: (name: string) => void;
+  onTogglePin: (name: string, pinned: boolean) => Promise<void>;
+  auth?: AuthState;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
+
+  const isOwner = auth?.isAuthenticated && auth.userId === project.ownerId;
+  const isSharedWithMe = auth?.isAuthenticated && !isOwner && project.ownerId !== null && !(!project.ownerId);
 
   useEffect(() => {
     if (!showMenu) return;
@@ -541,7 +1115,12 @@ function ProjectCard({
         {project.icon && (
           <span className="dashboard-project-card__icon">{project.icon}</span>
         )}
-        <span className="dashboard-project-card__name">{project.name}</span>
+        <span className="dashboard-project-card__name">
+          {project.pinned && <span className="dashboard-pin-icon" title="Pinned">&#x1F4CC;</span>}
+          {project.visibility === "private" && <span className="dashboard-visibility-icon" title="Private">&#x1F512;</span>}
+          {isSharedWithMe && <span className="dashboard-visibility-icon" title="Shared with you">&#x1F465;</span>}
+          {project.name}
+        </span>
         <button
           ref={menuBtnRef}
           className="dashboard-diagram-card__menu-btn"
@@ -566,21 +1145,34 @@ function ProjectCard({
             onClick={(e) => {
               e.stopPropagation();
               setShowMenu(false);
-              onEdit(project);
+              onTogglePin(project.name, !project.pinned);
             }}
           >
-            Edit
+            {project.pinned ? "Unpin" : "Pin to top"}
           </button>
-          <button
-            className="dashboard-diagram-card__delete"
-            onClick={(e) => {
-              e.stopPropagation();
-              setShowMenu(false);
-              onDelete(project.name);
-            }}
-          >
-            Delete
-          </button>
+          {(isOwner || !project.ownerId) && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                onEdit(project);
+              }}
+            >
+              Edit
+            </button>
+          )}
+          {(isOwner || !project.ownerId) && (
+            <button
+              className="dashboard-diagram-card__delete"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowMenu(false);
+                onDelete(project.name);
+              }}
+            >
+              Delete
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -709,6 +1301,9 @@ function ProjectsTab({
   skipNextDashboardSave,
   currentDiagramId,
   onDiagramLoaded,
+  auth,
+  collabAPI,
+  onReadOnlyDiagram,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
@@ -716,6 +1311,9 @@ function ProjectsTab({
   skipNextDashboardSave?: (elements?: readonly any[]) => void;
   currentDiagramId: string | null;
   onDiagramLoaded: (id: string) => void;
+  auth?: AuthState;
+  collabAPI?: CollabAPI | null;
+  onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
 }) {
   const [projects, setProjects] = useState<ProjectSummary[]>([]);
   const [view, setView] = useState<ProjectsView>("list");
@@ -723,6 +1321,7 @@ function ProjectsTab({
   const [selectedProject, setSelectedProject] = useState<ProjectSummary | null>(null);
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [projectSearchQuery, setProjectSearchQuery] = useState("");
 
   const fetchProjects = useCallback(() => {
     setLoading(true);
@@ -746,7 +1345,7 @@ function ProjectsTab({
     }
   }, [selectedProject, view]);
 
-  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave);
+  const baseHandleLoad = useLoadDiagram(excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, onReadOnlyDiagram, collabAPI, auth);
   const handleLoad = useCallback(async (diagram: DiagramSummary) => {
     await baseHandleLoad(diagram);
     onDiagramLoaded(diagram.id);
@@ -757,7 +1356,7 @@ function ProjectsTab({
     flushDashboardSave,
     skipNextDashboardSave,
     excalidrawAPI,
-    onDiagramLoaded: onDiagramLoaded,
+    onDiagramLoaded,
   });
 
   const handleRename = useCallback(async (id: string, title: string) => {
@@ -770,6 +1369,24 @@ function ProjectsTab({
     setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project } : d));
     fetchProjects();
   }, [fetchProjects]);
+
+  const handleClearProject = useCallback(async (id: string) => {
+    await updateDiagramMeta(id, { project: "" });
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, project: "" } : d));
+    fetchProjects();
+  }, [fetchProjects]);
+
+  const handleToggleDiagramPin = useCallback(async (id: string, pinned: boolean) => {
+    await updateDiagramMeta(id, { pinned });
+    setDiagrams((prev) => {
+      const updated = prev.map((d) => d.id === id ? { ...d, pinned } : d);
+      return updated.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+    });
+  }, []);
+
+  const handleDiagramUpdate = useCallback((id: string, updates: Partial<DiagramSummary>) => {
+    setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, ...updates } : d));
+  }, []);
 
   const handleSelectProject = useCallback((project: ProjectSummary) => {
     setSelectedProject(project);
@@ -791,6 +1408,18 @@ function ProjectsTab({
     }
   }, []);
 
+  const handleToggleProjectPin = useCallback(async (name: string, pinned: boolean) => {
+    try {
+      await updateProject(name, { pinned });
+      setProjects((prev) => {
+        const updated = prev.map((p) => p.name === name ? { ...p, pinned } : p);
+        return updated.sort((a, b) => (a.pinned === b.pinned ? 0 : a.pinned ? -1 : 1));
+      });
+    } catch (err) {
+      console.error("Failed to toggle project pin:", err);
+    }
+  }, []);
+
   const handleSaveProject = useCallback(async (data: {
     name: string;
     description?: string;
@@ -800,7 +1429,6 @@ function ProjectsTab({
   }) => {
     const { originalName, ...meta } = data;
     if (originalName) {
-      // Editing existing project
       if (originalName !== meta.name) {
         await renameProject(originalName, meta.name);
       }
@@ -817,7 +1445,12 @@ function ProjectsTab({
     fetchProjects();
   }, [fetchProjects]);
 
-  // List view
+  const filteredProjects = projects.filter((p) =>
+    !projectSearchQuery ||
+    p.name.toLowerCase().includes(projectSearchQuery.toLowerCase()) ||
+    p.description?.toLowerCase().includes(projectSearchQuery.toLowerCase()),
+  );
+
   if (view === "list") {
     return (
       <div className="dashboard-projects-tab">
@@ -832,20 +1465,37 @@ function ProjectsTab({
             + New Project
           </button>
         </div>
+        {projects.length > 0 && (
+          <div className="dashboard-search">
+            <input
+              type="text"
+              placeholder="Search projects..."
+              value={projectSearchQuery}
+              onChange={(e) => setProjectSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.stopPropagation()}
+              className="dashboard-search__input"
+            />
+          </div>
+        )}
         {loading && (
           <div className="dashboard-empty">Loading projects...</div>
         )}
         {!loading && projects.length === 0 && (
           <div className="dashboard-empty">No projects yet. Create one to organize your diagrams.</div>
         )}
+        {!loading && projects.length > 0 && filteredProjects.length === 0 && (
+          <div className="dashboard-empty">No matching projects</div>
+        )}
         <div className="dashboard-project-list">
-          {projects.map((project) => (
+          {filteredProjects.map((project) => (
             <ProjectCard
               key={project.name}
               project={project}
               onSelect={handleSelectProject}
               onEdit={handleEditProject}
               onDelete={handleDeleteProject}
+              onTogglePin={handleToggleProjectPin}
+              auth={auth}
             />
           ))}
         </div>
@@ -853,7 +1503,6 @@ function ProjectsTab({
     );
   }
 
-  // Form view (create or edit)
   if (view === "form") {
     return (
       <div className="dashboard-projects-tab">
@@ -881,7 +1530,6 @@ function ProjectsTab({
     );
   }
 
-  // Drill-down view
   return (
     <div className="dashboard-projects-tab">
       <button
@@ -924,7 +1572,11 @@ function ProjectsTab({
             onDelete={handleDeleteDiagram}
             onRename={handleRename}
             onSetProject={handleSetProject}
+            onClearProject={handleClearProject}
+            onTogglePin={handleToggleDiagramPin}
             currentDiagramId={currentDiagramId}
+            auth={auth}
+            onDiagramUpdate={handleDiagramUpdate}
           />
         ))}
       </div>
@@ -932,9 +1584,30 @@ function ProjectsTab({
   );
 }
 
-export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error";
+// =============================================================
+// SaveStatusIndicator
+// =============================================================
 
-function SaveStatusIndicator({ status }: { status: DashboardSaveStatus }) {
+export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error" | "readonly";
+
+function SaveStatusIndicator({
+  status,
+  onFork,
+}: {
+  status: DashboardSaveStatus;
+  onFork?: () => void;
+}) {
+  if (status === "readonly") {
+    return (
+      <span
+        className="dashboard-save-status dashboard-save-status--readonly"
+        onClick={onFork}
+        title="Click to save as your own copy"
+      >
+        Read-only — Fork to edit
+      </span>
+    );
+  }
   const className = `dashboard-save-status dashboard-save-status--${status}`;
   return (
     <span className={className}>
@@ -946,28 +1619,65 @@ function SaveStatusIndicator({ status }: { status: DashboardSaveStatus }) {
   );
 }
 
+// =============================================================
+// DashboardSidebar (main export)
+// =============================================================
+
+const DASHBOARD_DOCKED_KEY = "dashboard-sidebar-docked";
+
 export const DashboardSidebar: React.FC<{
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
   flushDashboardSave?: () => void;
   skipNextDashboardSave?: (elements?: readonly any[]) => void;
   dashboardSaveStatus?: DashboardSaveStatus;
-}> = ({ excalidrawAPI, dashboardDiagramIdRef, flushDashboardSave, skipNextDashboardSave, dashboardSaveStatus = "idle" }) => {
+  auth?: AuthState;
+  collabAPI?: CollabAPI | null;
+  onLogin?: (email: string, password: string) => Promise<void>;
+  onLogout?: () => void;
+  onForkDiagram?: () => void;
+  onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
+}> = ({
+  excalidrawAPI,
+  dashboardDiagramIdRef,
+  flushDashboardSave,
+  skipNextDashboardSave,
+  dashboardSaveStatus = "idle",
+  auth,
+  collabAPI,
+  onLogin,
+  onLogout,
+  onForkDiagram,
+  onReadOnlyDiagram,
+}) => {
   const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(
     dashboardDiagramIdRef?.current ?? null,
   );
+  const [docked, setDocked] = useState(() => {
+    try {
+      return localStorage.getItem(DASHBOARD_DOCKED_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const [showLoginForm, setShowLoginForm] = useState(false);
+
+  const handleDock = useCallback((isDocked: boolean) => {
+    setDocked(isDocked);
+    try {
+      localStorage.setItem(DASHBOARD_DOCKED_KEY, String(isDocked));
+    } catch {}
+  }, []);
 
   const handleDiagramLoaded = useCallback((id: string) => {
     setCurrentDiagramId(id);
   }, []);
 
-  // Only render if dashboard API URL is configured
   if (!import.meta.env.VITE_APP_DASHBOARD_API_URL) {
     return null;
   }
 
   const handleNewDiagram = () => {
-    // Flush pending save for current diagram before switching
     flushDashboardSave?.();
     if (dashboardDiagramIdRef) {
       const newId = `web-${crypto.randomUUID()}`;
@@ -975,21 +1685,28 @@ export const DashboardSidebar: React.FC<{
       localStorage.setItem("dashboard-diagram-id", newId);
       setCurrentDiagramId(newId);
     }
-    // Skip the auto-save triggered by updateScene (empty canvas, nothing to save)
     skipNextDashboardSave?.();
+    const currentOpenSidebar = excalidrawAPI.getAppState().openSidebar;
     excalidrawAPI.updateScene({
       elements: [],
-      appState: { name: "" },
+      appState: { name: "", openSidebar: currentOpenSidebar },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
   };
 
+  const handleLogin = async (email: string, password: string) => {
+    await onLogin?.(email, password);
+    setShowLoginForm(false);
+  };
+
+  const isAuthenticated = auth?.isAuthenticated;
+
   return (
-    <Sidebar name={DASHBOARD_SIDEBAR_NAME}>
+    <Sidebar name={DASHBOARD_SIDEBAR_NAME} docked={docked} onDock={handleDock}>
       <Sidebar.Tabs>
         <Sidebar.Header>
           <span className="dashboard-sidebar-title">My Diagrams</span>
-          <SaveStatusIndicator status={dashboardSaveStatus} />
+          <SaveStatusIndicator status={dashboardSaveStatus} onFork={onForkDiagram} />
           <button
             className="dashboard-new-btn"
             onClick={handleNewDiagram}
@@ -997,25 +1714,79 @@ export const DashboardSidebar: React.FC<{
           >
             + New
           </button>
+          {/* Auth UI */}
+          {!isAuthenticated && !showLoginForm && import.meta.env.VITE_APP_AUTH_LOGIN_URL && (
+            <button
+              className="dashboard-login-btn"
+              onClick={() => setShowLoginForm(true)}
+            >
+              Log in
+            </button>
+          )}
+          {isAuthenticated && (
+            <div className="dashboard-user-info">
+              <span className="dashboard-user-info__email" title={auth?.email || undefined}>
+                {auth?.email || "Logged in"}
+              </span>
+              <button className="dashboard-user-info__logout" onClick={onLogout}>
+                Log out
+              </button>
+            </div>
+          )}
           <Sidebar.TabTriggers>
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_ALL}>
               All
             </Sidebar.TabTrigger>
+            {isAuthenticated && (
+              <Sidebar.TabTrigger tab={DASHBOARD_TAB_MINE}>
+                Mine
+              </Sidebar.TabTrigger>
+            )}
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_PROJECTS}>
               Projects
             </Sidebar.TabTrigger>
           </Sidebar.TabTriggers>
         </Sidebar.Header>
+
+        {/* Login form (inline, above tabs content) */}
+        {showLoginForm && !isAuthenticated && (
+          <LoginForm
+            onLogin={handleLogin}
+            onCancel={() => setShowLoginForm(false)}
+          />
+        )}
+
         <Sidebar.Tab tab={DASHBOARD_TAB_ALL}>
-          <AllDiagramsTab
+          <DiagramsTab
             excalidrawAPI={excalidrawAPI}
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={flushDashboardSave}
             skipNextDashboardSave={skipNextDashboardSave}
             currentDiagramId={currentDiagramId}
             onDiagramLoaded={handleDiagramLoaded}
+            auth={auth}
+            collabAPI={collabAPI}
+            onReadOnlyDiagram={onReadOnlyDiagram}
           />
         </Sidebar.Tab>
+
+        {isAuthenticated && (
+          <Sidebar.Tab tab={DASHBOARD_TAB_MINE}>
+            <DiagramsTab
+              excalidrawAPI={excalidrawAPI}
+              dashboardDiagramIdRef={dashboardDiagramIdRef}
+              flushDashboardSave={flushDashboardSave}
+              skipNextDashboardSave={skipNextDashboardSave}
+              currentDiagramId={currentDiagramId}
+              onDiagramLoaded={handleDiagramLoaded}
+              auth={auth}
+              collabAPI={collabAPI}
+              mineOnly
+              onReadOnlyDiagram={onReadOnlyDiagram}
+            />
+          </Sidebar.Tab>
+        )}
+
         <Sidebar.Tab tab={DASHBOARD_TAB_PROJECTS}>
           <ProjectsTab
             excalidrawAPI={excalidrawAPI}
@@ -1024,6 +1795,9 @@ export const DashboardSidebar: React.FC<{
             skipNextDashboardSave={skipNextDashboardSave}
             currentDiagramId={currentDiagramId}
             onDiagramLoaded={handleDiagramLoaded}
+            auth={auth}
+            collabAPI={collabAPI}
+            onReadOnlyDiagram={onReadOnlyDiagram}
           />
         </Sidebar.Tab>
       </Sidebar.Tabs>

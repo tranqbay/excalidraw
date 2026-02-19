@@ -417,6 +417,24 @@ const ExcalidrawWrapper = () => {
     ),
   ).current;
 
+  useEffect(() => {
+    trackEvent("load", "frame", getFrame());
+    // Delayed so that the app has a time to load the latest SW
+    setTimeout(() => {
+      trackEvent("load", "version", getVersion());
+    }, VERSION_TIMEOUT);
+  }, []);
+
+  const [excalidrawAPI, excalidrawRefCallback] =
+    useCallbackRefState<ExcalidrawImperativeAPI>();
+
+  const [, setShareDialogState] = useAtom(shareDialogStateAtom);
+  const [collabAPI] = useAtom(collabAPIAtom);
+  const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
+    return isCollaborationLink(window.location.href);
+  });
+  const collabError = useAtomValue(collabErrorIndicatorAtom);
+
   // Auth handlers
   const handleLogin = useCallback(async (email: string, password: string) => {
     const state = await authLogin(email, password);
@@ -432,7 +450,6 @@ const ExcalidrawWrapper = () => {
   const handleReadOnlyDiagram = useCallback((diagramId: string, _permission: string) => {
     readOnlyDiagramIdRef.current = diagramId;
     setDashboardSaveStatus("readonly");
-    // Cancel any pending dashboard save
     debouncedDashboardSave.cancel();
   }, [debouncedDashboardSave]);
 
@@ -443,22 +460,18 @@ const ExcalidrawWrapper = () => {
     const elements = excalidrawAPI.getSceneElements();
     const appState = excalidrawAPI.getAppState();
 
-    // Create a new diagram ID for the fork
     const newId = `web-${crypto.randomUUID()}`;
     const originalTitle = appState.name || "";
     const forkTitle = originalTitle ? `Copy of ${originalTitle}` : "";
 
-    // Switch to the new diagram
     dashboardDiagramIdRef.current = newId;
     localStorage.setItem("dashboard-diagram-id", newId);
     readOnlyDiagramIdRef.current = null;
 
-    // Reset fingerprint so next save goes through
     lastSavedFingerprintRef.current = "";
     skipDashboardSaveUntilRef.current = 0;
     saveRetryAfterRef.current = 0;
 
-    // Update the scene name if we have a title
     if (forkTitle) {
       excalidrawAPI.updateScene({
         appState: { name: forkTitle },
@@ -466,7 +479,6 @@ const ExcalidrawWrapper = () => {
       });
     }
 
-    // Save immediately to create the fork on the server
     setDashboardSaveStatus("saving");
     saveDiagram(newId, elements, { title: forkTitle || undefined })
       .then(() => {
@@ -487,24 +499,6 @@ const ExcalidrawWrapper = () => {
         saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
       });
   }, [excalidrawAPI, debouncedDashboardSave]);
-
-  useEffect(() => {
-    trackEvent("load", "frame", getFrame());
-    // Delayed so that the app has a time to load the latest SW
-    setTimeout(() => {
-      trackEvent("load", "version", getVersion());
-    }, VERSION_TIMEOUT);
-  }, []);
-
-  const [excalidrawAPI, excalidrawRefCallback] =
-    useCallbackRefState<ExcalidrawImperativeAPI>();
-
-  const [, setShareDialogState] = useAtom(shareDialogStateAtom);
-  const [collabAPI] = useAtom(collabAPIAtom);
-  const [isCollaborating] = useAtomWithInitialValue(isCollaboratingAtom, () => {
-    return isCollaborationLink(window.location.href);
-  });
-  const collabError = useAtomValue(collabErrorIndicatorAtom);
 
   useHandleLibrary({
     excalidrawAPI,

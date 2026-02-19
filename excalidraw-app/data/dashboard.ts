@@ -324,6 +324,30 @@ export async function lookupUser(email: string): Promise<{ userId: string; email
   return res.json();
 }
 
+// --- Version history ---
+
+export interface DiagramVersion {
+  id: number;
+  diagramId: string;
+  elementCount: number;
+  createdBy: string | null;
+  createdAt: string;
+}
+
+export async function listDiagramVersions(id: string): Promise<DiagramVersion[]> {
+  const res = await authFetch(`${DASHBOARD_API}/diagrams/${id}/versions`);
+  if (!res.ok) throw new Error(`Failed to list versions: ${res.statusText}`);
+  const data = await res.json();
+  return data.versions;
+}
+
+export async function restoreDiagramVersion(id: string, versionId: number): Promise<void> {
+  const res = await authFetch(`${DASHBOARD_API}/diagrams/${id}/versions/${versionId}/restore`, {
+    method: "POST",
+  });
+  if (!res.ok) throw new Error(`Failed to restore version: ${res.statusText}`);
+}
+
 // --- Auth check ---
 
 export async function checkAuth(): Promise<{ authenticated: boolean; userId: string | null; userType: string | null }> {

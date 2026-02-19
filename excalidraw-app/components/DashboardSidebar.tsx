@@ -15,13 +15,17 @@ import {
   loadDiagramElements,
   deleteDiagram,
   updateDiagramMeta,
+  saveDiagram,
   createProject,
   updateProject,
   renameProject,
   deleteProject,
   setDiagramVisibility,
   setProjectVisibility,
+  listDiagramVersions,
+  restoreDiagramVersion,
 } from "../data/dashboard";
+import type { DiagramVersion } from "../data/dashboard";
 import type { AuthState } from "../data/auth";
 import type { CollabAPI } from "../collab/Collab";
 import { getCollaborationLinkData } from "../data";
@@ -235,6 +239,103 @@ function ProjectPicker({
 }
 
 // =============================================================
+// Version History Panel
+// =============================================================
+
+function VersionHistoryPanel({
+  diagramId,
+  onRestore,
+  onClose,
+}: {
+  diagramId: string;
+  onRestore: (diagramId: string) => void;
+  onClose: () => void;
+}) {
+  const [versions, setVersions] = useState<DiagramVersion[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [restoring, setRestoring] = useState<number | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    listDiagramVersions(diagramId)
+      .then(setVersions)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [diagramId]);
+
+  useEffect(() => {
+    const handleMouseDown = (e: MouseEvent) => {
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose();
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    document.addEventListener("mousedown", handleMouseDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handleMouseDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [onClose]);
+
+  const handleRestore = async (versionId: number) => {
+    if (!window.confirm("Restore this version? Current changes will be overwritten.")) return;
+    setRestoring(versionId);
+    try {
+      await restoreDiagramVersion(diagramId, versionId);
+      onRestore(diagramId);
+      onClose();
+    } catch (err) {
+      console.error("Restore failed:", err);
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <div
+      ref={panelRef}
+      className="dashboard-version-panel"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="dashboard-version-panel__header">
+        <span className="dashboard-version-panel__title">Version History</span>
+        <button className="dashboard-version-panel__close" onClick={onClose}>
+          &times;
+        </button>
+      </div>
+      <div className="dashboard-version-panel__list">
+        {loading && <div className="dashboard-empty">Loading versions...</div>}
+        {!loading && versions.length === 0 && (
+          <div className="dashboard-empty">No versions yet</div>
+        )}
+        {versions.map((v) => (
+          <div key={v.id} className="dashboard-version-panel__item">
+            <div className="dashboard-version-panel__item-info">
+              <span className="dashboard-version-panel__item-date">
+                {formatDate(v.createdAt)}
+              </span>
+              <span className="dashboard-version-panel__item-count">
+                {v.elementCount} elements
+              </span>
+            </div>
+            <button
+              className="dashboard-version-panel__restore-btn"
+              onClick={() => handleRestore(v.id)}
+              disabled={restoring !== null}
+            >
+              {restoring === v.id ? "Restoring..." : "Restore"}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// =============================================================
 // DiagramCard — with visibility/share/live indicators
 // =============================================================
 
@@ -250,6 +351,8 @@ function DiagramCard({
   auth,
   onDiagramUpdate,
   hideProject,
+  collabCount,
+  onRestoreVersion,
 }: {
   diagram: DiagramSummary;
   onLoad: (diagram: DiagramSummary) => Promise<void>;
@@ -262,6 +365,8 @@ function DiagramCard({
   auth?: AuthState;
   onDiagramUpdate?: (id: string, updates: Partial<DiagramSummary>) => void;
   hideProject?: boolean;
+  collabCount?: number;
+  onRestoreVersion?: (diagramId: string) => void;
 }) {
   const [showMenu, setShowMenu] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -271,6 +376,7 @@ function DiagramCard({
   const [pickerProjects, setPickerProjects] = useState<ProjectSummary[]>([]);
   const [linkCopied, setLinkCopied] = useState(false);
   const [visibilityFeedback, setVisibilityFeedback] = useState<string | null>(null);
+  const [showVersionHistory, setShowVersionHistory] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
@@ -317,7 +423,7 @@ function DiagramCard({
   }, [showProjectPicker]);
 
   const handleClick = async () => {
-    if (loading || isRenaming || showProjectPicker || showMenu) return;
+    if (loading || isRenaming || showProjectPicker || showMenu || showVersionHistory) return;
     setLoading(true);
     try {
       await onLoad(diagram);
@@ -364,7 +470,7 @@ function DiagramCard({
     "dashboard-diagram-card",
     loading && "dashboard-diagram-card--loading",
     isCurrent && "dashboard-diagram-card--current",
-    (showMenu || showProjectPicker) && "dashboard-diagram-card--menu-open",
+    (showMenu || showProjectPicker || showVersionHistory) && "dashboard-diagram-card--menu-open",
   ].filter(Boolean).join(" ");
 
   return (
@@ -393,6 +499,9 @@ function DiagramCard({
               <span className="dashboard-live-badge" title="Live collaboration active">
                 <span className="dashboard-live-badge__dot" />
                 Live
+                {isCurrent && collabCount && collabCount > 1 ? (
+                  <span className="dashboard-live-badge__count">{collabCount}</span>
+                ) : null}
               </span>
             )}
           </span>
@@ -556,6 +665,16 @@ function DiagramCard({
               </button>
             </>
           )}
+          {/* --- History --- */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setShowMenu(false);
+              setShowVersionHistory(true);
+            }}
+          >
+            Version history
+          </button>
           {/* --- Danger section --- */}
           {(isOwner || isLegacy) && (
             <>
@@ -573,6 +692,13 @@ function DiagramCard({
             </>
           )}
         </div>
+      )}
+      {showVersionHistory && (
+        <VersionHistoryPanel
+          diagramId={diagram.id}
+          onRestore={(id) => onRestoreVersion?.(id)}
+          onClose={() => setShowVersionHistory(false)}
+        />
       )}
     </div>
   );
@@ -716,6 +842,7 @@ function DiagramsTab({
   collabAPI,
   mineOnly,
   onReadOnlyDiagram,
+  collabCount,
 }: {
   excalidrawAPI: ExcalidrawImperativeAPI;
   dashboardDiagramIdRef?: React.MutableRefObject<string | null>;
@@ -727,6 +854,7 @@ function DiagramsTab({
   collabAPI?: CollabAPI | null;
   mineOnly?: boolean;
   onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
+  collabCount?: number;
 }) {
   const PAGE_SIZE = 50;
   const [diagrams, setDiagrams] = useState<DiagramSummary[]>([]);
@@ -825,6 +953,14 @@ function DiagramsTab({
     setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, ...updates } : d));
   }, []);
 
+  const handleRestoreVersion = useCallback(async (diagramId: string) => {
+    // After restoring a version, reload the diagram from server
+    const diagram = diagrams.find((d) => d.id === diagramId);
+    if (diagram) {
+      await handleLoad(diagram);
+    }
+  }, [diagrams, handleLoad]);
+
   return (
     <div className="dashboard-all-tab">
       <div className="dashboard-search">
@@ -864,6 +1000,8 @@ function DiagramsTab({
             currentDiagramId={currentDiagramId}
             auth={auth}
             onDiagramUpdate={handleDiagramUpdate}
+            collabCount={collabCount}
+            onRestoreVersion={handleRestoreVersion}
           />
         ))}
         {hasMore && !loading && (
@@ -900,6 +1038,7 @@ function ProjectCard({
   onEdit,
   onDelete,
   onTogglePin,
+  onToggleVisibility,
   auth,
 }: {
   project: ProjectSummary;
@@ -907,9 +1046,11 @@ function ProjectCard({
   onEdit: (project: ProjectSummary) => void;
   onDelete: (name: string) => void;
   onTogglePin: (name: string, pinned: boolean) => Promise<void>;
+  onToggleVisibility?: (name: string, visibility: "public" | "private") => Promise<void>;
   auth?: AuthState;
 }) {
   const [showMenu, setShowMenu] = useState(false);
+  const [visibilityFeedback, setVisibilityFeedback] = useState<string | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
 
@@ -969,6 +1110,9 @@ function ProjectCard({
         <span>{project.diagramCount} diagram{project.diagramCount !== 1 ? "s" : ""}</span>
         <span>{formatDate(project.updatedAt)}</span>
       </div>
+      {visibilityFeedback && (
+        <div className="dashboard-diagram-card__toast">{visibilityFeedback}</div>
+      )}
       {showMenu && (
         <div ref={menuRef} className="dashboard-project-card__menu">
           <button
@@ -991,17 +1135,43 @@ function ProjectCard({
               Edit
             </button>
           )}
+          {isOwner && (
+            <>
+              <div className="dashboard-diagram-card__menu-sep" />
+              <button
+                onClick={async (e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  try {
+                    const newVis = project.visibility === "public" ? "private" : "public";
+                    await onToggleVisibility?.(project.name, newVis);
+                    setVisibilityFeedback(newVis === "private" ? "Made private" : "Made public");
+                    setTimeout(() => setVisibilityFeedback(null), 1500);
+                  } catch (err) {
+                    console.error("Toggle visibility failed:", err);
+                    setVisibilityFeedback("Failed to change visibility");
+                    setTimeout(() => setVisibilityFeedback(null), 2000);
+                  }
+                }}
+              >
+                Make {project.visibility === "public" ? "private" : "public"}
+              </button>
+            </>
+          )}
           {(isOwner || !project.ownerId) && (
-            <button
-              className="dashboard-diagram-card__delete"
-              onClick={(e) => {
-                e.stopPropagation();
-                setShowMenu(false);
-                onDelete(project.name);
-              }}
-            >
-              Delete
-            </button>
+            <>
+              <div className="dashboard-diagram-card__menu-sep" />
+              <button
+                className="dashboard-diagram-card__delete"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowMenu(false);
+                  onDelete(project.name);
+                }}
+              >
+                Delete
+              </button>
+            </>
           )}
         </div>
       )}
@@ -1218,6 +1388,13 @@ function ProjectsTab({
     setDiagrams((prev) => prev.map((d) => d.id === id ? { ...d, ...updates } : d));
   }, []);
 
+  const handleRestoreVersion = useCallback(async (diagramId: string) => {
+    const diagram = diagrams.find((d) => d.id === diagramId);
+    if (diagram) {
+      await handleLoad(diagram);
+    }
+  }, [diagrams, handleLoad]);
+
   const handleSelectProject = useCallback((project: ProjectSummary) => {
     setSelectedProject(project);
     setView("drilldown");
@@ -1248,6 +1425,11 @@ function ProjectsTab({
     } catch (err) {
       console.error("Failed to toggle project pin:", err);
     }
+  }, []);
+
+  const handleToggleProjectVisibility = useCallback(async (name: string, visibility: "public" | "private") => {
+    await setProjectVisibility(name, visibility);
+    setProjects((prev) => prev.map((p) => p.name === name ? { ...p, visibility } : p));
   }, []);
 
   const handleSaveProject = useCallback(async (data: {
@@ -1325,6 +1507,7 @@ function ProjectsTab({
               onEdit={handleEditProject}
               onDelete={handleDeleteProject}
               onTogglePin={handleToggleProjectPin}
+              onToggleVisibility={handleToggleProjectVisibility}
               auth={auth}
             />
           ))}
@@ -1407,6 +1590,7 @@ function ProjectsTab({
             currentDiagramId={currentDiagramId}
             auth={auth}
             onDiagramUpdate={handleDiagramUpdate}
+            onRestoreVersion={handleRestoreVersion}
             hideProject
           />
         ))}
@@ -1419,7 +1603,7 @@ function ProjectsTab({
 // SaveStatusIndicator
 // =============================================================
 
-export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error" | "readonly";
+export type DashboardSaveStatus = "idle" | "saving" | "saved" | "error" | "readonly" | "queued";
 
 function SaveStatusIndicator({
   status,
@@ -1445,6 +1629,7 @@ function SaveStatusIndicator({
       {status === "saving" && "Saving..."}
       {status === "saved" && "\u2713 Saved"}
       {status === "error" && "\u2022 Save failed"}
+      {status === "queued" && "\u2022 Queued (offline)"}
       {status === "idle" && "\u00A0"}
     </span>
   );
@@ -1484,6 +1669,20 @@ export const DashboardSidebar: React.FC<{
   const [currentDiagramId, setCurrentDiagramId] = useState<string | null>(
     dashboardDiagramIdRef?.current ?? null,
   );
+  const [collabCount, setCollabCount] = useState(0);
+
+  useEffect(() => {
+    if (!collabAPI?.isCollaborating()) {
+      setCollabCount(0);
+      return;
+    }
+    const interval = setInterval(() => {
+      const count = excalidrawAPI.getAppState().collaborators.size;
+      setCollabCount(count);
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [excalidrawAPI, collabAPI]);
+
   const [docked, setDocked] = useState(() => {
     try {
       return localStorage.getItem(DASHBOARD_DOCKED_KEY) === "true";
@@ -1510,8 +1709,9 @@ export const DashboardSidebar: React.FC<{
 
   const handleNewDiagram = () => {
     flushDashboardSave?.();
+    let newId: string | undefined;
     if (dashboardDiagramIdRef) {
-      const newId = `web-${crypto.randomUUID()}`;
+      newId = `web-${crypto.randomUUID()}`;
       dashboardDiagramIdRef.current = newId;
       localStorage.setItem("dashboard-diagram-id", newId);
       setCurrentDiagramId(newId);
@@ -1523,6 +1723,10 @@ export const DashboardSidebar: React.FC<{
       appState: { name: "", openSidebar: currentOpenSidebar },
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
+    // Fire-and-forget: create DB record immediately for crash recovery
+    if (newId) {
+      saveDiagram(newId, []).catch(() => {});
+    }
   };
 
   const handleLogin = async (email: string, password: string) => {
@@ -1600,6 +1804,7 @@ export const DashboardSidebar: React.FC<{
             auth={auth}
             collabAPI={collabAPI}
             onReadOnlyDiagram={onReadOnlyDiagram}
+            collabCount={collabCount}
           />
         </Sidebar.Tab>
 
@@ -1616,6 +1821,7 @@ export const DashboardSidebar: React.FC<{
               collabAPI={collabAPI}
               mineOnly
               onReadOnlyDiagram={onReadOnlyDiagram}
+              collabCount={collabCount}
             />
           </Sidebar.Tab>
         )}

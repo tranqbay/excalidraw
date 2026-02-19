@@ -97,6 +97,7 @@ import {
 } from "./components/DashboardSidebar";
 import type { DashboardSaveStatus } from "./components/DashboardSidebar";
 import { saveDiagram } from "./data/dashboard";
+import { queueSave, drainQueue } from "./data/dashboardOfflineQueue";
 import type { AuthState } from "./data/auth";
 import { getAuthState, login as authLogin, logout as authLogout } from "./data/auth";
 import {
@@ -397,6 +398,17 @@ const ExcalidrawWrapper = () => {
         // Skip saving if elements haven't changed since last save/load
         const fingerprint = visibleElements.map((el: any) => `${el.id}:${el.version}`).join(",");
         if (fingerprint === lastSavedFingerprintRef.current) return;
+
+        // Offline: queue to IndexedDB instead of saving to server
+        if (!navigator.onLine) {
+          queueSave(id, elements, { title: name }).then(() => {
+            setDashboardSaveStatus("queued");
+            if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+            saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
+          }).catch(() => {});
+          return;
+        }
+
         setDashboardSaveStatus("saving");
         if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
         saveDiagram(id, elements, { title: name })
@@ -408,6 +420,8 @@ const ExcalidrawWrapper = () => {
           })
           .catch((err) => {
             console.warn("Dashboard auto-save failed:", err);
+            // On network failure, queue instead of just backing off
+            queueSave(id, elements, { title: name }).catch(() => {});
             saveRetryAfterRef.current = Date.now() + 30000; // 30s backoff after failure
             setDashboardSaveStatus("error");
             saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 3000);
@@ -710,11 +724,31 @@ const ExcalidrawWrapper = () => {
       }
     };
 
+    // Drain offline queue when connectivity is restored
+    const onOnline = () => {
+      if (import.meta.env.VITE_APP_DASHBOARD_API_URL) {
+        setDashboardSaveStatus("saving");
+        drainQueue()
+          .then((count) => {
+            if (count > 0) {
+              lastSavedFingerprintRef.current = ""; // Reset fingerprint to allow fresh saves
+              setDashboardSaveStatus("saved");
+              if (saveStatusTimeoutRef.current) clearTimeout(saveStatusTimeoutRef.current);
+              saveStatusTimeoutRef.current = setTimeout(() => setDashboardSaveStatus("idle"), 2000);
+            } else {
+              setDashboardSaveStatus("idle");
+            }
+          })
+          .catch(() => setDashboardSaveStatus("idle"));
+      }
+    };
+
     window.addEventListener(EVENT.HASHCHANGE, onHashChange, false);
     window.addEventListener(EVENT.UNLOAD, onUnload, false);
     window.addEventListener(EVENT.BLUR, visibilityChange, false);
     document.addEventListener(EVENT.VISIBILITY_CHANGE, visibilityChange, false);
     window.addEventListener(EVENT.FOCUS, visibilityChange, false);
+    window.addEventListener("online", onOnline);
     return () => {
       window.removeEventListener(EVENT.HASHCHANGE, onHashChange, false);
       window.removeEventListener(EVENT.UNLOAD, onUnload, false);
@@ -725,6 +759,7 @@ const ExcalidrawWrapper = () => {
         visibilityChange,
         false,
       );
+      window.removeEventListener("online", onOnline);
       clearTimeout(titleTimeout);
     };
   }, [isCollabDisabled, collabAPI, excalidrawAPI, setLangCode]);
@@ -983,9 +1018,6 @@ const ExcalidrawWrapper = () => {
         autoFocus={true}
         theme={editorTheme}
         renderTopRightUI={(isMobile) => {
-          if (isMobile) {
-            return null;
-          }
           return (
             <div className="top-right-ui">
               {import.meta.env.VITE_APP_DASHBOARD_API_URL && (
@@ -994,11 +1026,13 @@ const ExcalidrawWrapper = () => {
                   tab="all"
                   className="dashboard-sidebar-trigger"
                 >
-                  My Diagrams
+                  {isMobile ? null : "My Diagrams"}
                 </Sidebar.Trigger>
               )}
-              {collabError.message && <CollabError collabError={collabError} />}
-              {collabAPI && !isCollabDisabled && (
+              {!isMobile && collabError.message && (
+                <CollabError collabError={collabError} />
+              )}
+              {!isMobile && collabAPI && !isCollabDisabled && (
                 <LiveCollaborationTrigger
                   isCollaborating={isCollaborating}
                   onSelect={() =>

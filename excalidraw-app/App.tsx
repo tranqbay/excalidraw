@@ -840,8 +840,6 @@ const ExcalidrawWrapper = () => {
     // Auto-save to dashboard API (debounced) — skip if readonly
     if (readOnlyDiagramIdRef.current) {
       debouncedDashboardSave.cancel();
-    } else if (Date.now() < skipDashboardSaveUntilRef.current) {
-      debouncedDashboardSave.cancel();
     } else {
       debouncedDashboardSave(elements, appState.name || undefined);
     }
@@ -1179,7 +1177,7 @@ const ExcalidrawWrapper = () => {
             dashboardDiagramIdRef={dashboardDiagramIdRef}
             flushDashboardSave={() => debouncedDashboardSave.flush()}
             skipNextDashboardSave={(elements?: readonly any[]) => {
-              skipDashboardSaveUntilRef.current = Date.now() + 6000;
+              skipDashboardSaveUntilRef.current = Date.now() + 1500;
               saveRetryAfterRef.current = 0; // Reset backoff when switching diagrams
               if (readOnlyDiagramIdRef.current) {
                 readOnlyDiagramIdRef.current = null; // Clear readonly state

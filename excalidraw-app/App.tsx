@@ -96,7 +96,7 @@ import {
   DASHBOARD_SIDEBAR_NAME,
 } from "./components/DashboardSidebar";
 import type { DashboardSaveStatus } from "./components/DashboardSidebar";
-import { saveDiagram } from "./data/dashboard";
+import { saveDiagram, loadDiagramElements } from "./data/dashboard";
 import { queueSave, drainQueue } from "./data/dashboardOfflineQueue";
 import type { AuthState } from "./data/auth";
 import { getAuthState, login as authLogin, logout as authLogout } from "./data/auth";
@@ -387,6 +387,8 @@ const ExcalidrawWrapper = () => {
       (elements: readonly any[], name?: string) => {
         const id = dashboardDiagramIdRef.current;
         if (!id || !import.meta.env.VITE_APP_DASHBOARD_API_URL) return;
+        // Never auto-save read-only diagrams (system-owned)
+        if (readOnlyDiagramIdRef.current === id) return;
         // Safety: skip if within skip window (e.g. just loaded/deleted a diagram)
         if (Date.now() < skipDashboardSaveUntilRef.current) return;
         // Backoff: skip if within error cooldown period
@@ -633,6 +635,19 @@ const ExcalidrawWrapper = () => {
       await getStorageBackend();
       loadImages(data, /* isInitialLoad */ true);
       initialStatePromiseRef.current.promise.resolve(data.scene);
+
+      // Check permission for the restored dashboard diagram (e.g. system-owned)
+      const diagramId = dashboardDiagramIdRef.current;
+      if (diagramId && import.meta.env.VITE_APP_DASHBOARD_API_URL) {
+        try {
+          const diagData = await loadDiagramElements(diagramId);
+          if (diagData?.permission === "read") {
+            handleReadOnlyDiagram(diagramId, "read");
+          }
+        } catch {
+          // Diagram may not exist in DB yet (new unsaved diagram)
+        }
+      }
     });
 
     const onHashChange = async (event: HashChangeEvent) => {

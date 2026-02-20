@@ -381,6 +381,7 @@ const ExcalidrawWrapper = () => {
   const [authState, setAuthState] = useState<AuthState>(() => getAuthState());
   // Track whether current diagram is read-only (shared with read permission)
   const readOnlyDiagramIdRef = useRef<string | null>(null);
+  const [isViewMode, setIsViewMode] = useState(false);
   const debouncedDashboardSave = useRef(
     debounce(
       (elements: readonly any[], name?: string) => {
@@ -476,6 +477,7 @@ const ExcalidrawWrapper = () => {
   // Called when a read-only shared diagram is loaded
   const handleReadOnlyDiagram = useCallback((diagramId: string, _permission: string) => {
     readOnlyDiagramIdRef.current = diagramId;
+    setIsViewMode(true);
     setDashboardSaveStatus("readonly");
     debouncedDashboardSave.cancel();
   }, [debouncedDashboardSave]);
@@ -494,6 +496,7 @@ const ExcalidrawWrapper = () => {
     dashboardDiagramIdRef.current = newId;
     localStorage.setItem("dashboard-diagram-id", newId);
     readOnlyDiagramIdRef.current = null;
+    setIsViewMode(false);
 
     lastSavedFingerprintRef.current = "";
     skipDashboardSaveUntilRef.current = 0;
@@ -990,6 +993,7 @@ const ExcalidrawWrapper = () => {
         initialData={initialStatePromiseRef.current.promise}
         isCollaborating={isCollaborating}
         onPointerUpdate={collabAPI?.onPointerUpdate}
+        viewModeEnabled={isViewMode}
         UIOptions={{
           canvasActions: {
             toggleTheme: true,
@@ -1181,6 +1185,7 @@ const ExcalidrawWrapper = () => {
               saveRetryAfterRef.current = 0; // Reset backoff when switching diagrams
               if (readOnlyDiagramIdRef.current) {
                 readOnlyDiagramIdRef.current = null; // Clear readonly state
+                setIsViewMode(false);
                 setDashboardSaveStatus("idle");
               }
               if (elements?.length) {

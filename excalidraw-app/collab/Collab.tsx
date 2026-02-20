@@ -470,6 +470,7 @@ class Collab extends PureComponent<CollabProps, CollabState> {
 
   startCollaboration = async (
     existingRoomLinkData: null | { roomId: string; roomKey: string },
+    collabPermission?: "edit" | "view",
   ) => {
     if (!this.state.username) {
       import("@excalidraw/random-username").then(({ getRandomUsername }) => {
@@ -697,7 +698,10 @@ class Collab extends PureComponent<CollabProps, CollabState> {
     if (import.meta.env.VITE_APP_DASHBOARD_API_URL) {
       const dashboardId = localStorage.getItem("dashboard-diagram-id");
       if (dashboardId) {
-        updateDiagramMeta(dashboardId, { collabLink: window.location.href }).catch(
+        updateDiagramMeta(dashboardId, {
+          collabLink: window.location.href,
+          collabPermission: collabPermission || "edit",
+        }).catch(
           (err) => console.warn("Failed to save collab link:", err),
         );
       }

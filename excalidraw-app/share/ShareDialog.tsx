@@ -22,6 +22,8 @@ import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
 import { useCopyStatus } from "@excalidraw/excalidraw/hooks/useCopiedIndicator";
 import { atom, useAtom, useAtomValue } from "../app-jotai";
 
+import { updateDiagramMeta } from "../data/dashboard";
+
 import "./ShareDialog.scss";
 
 type OnExportToBackend = () => void;
@@ -30,6 +32,8 @@ type ShareDialogType = "share" | "collaborationOnly";
 export const shareDialogStateAtom = atom<
   { isOpen: false } | { isOpen: true; type: ShareDialogType }
 >({ isOpen: false });
+
+export const collabPermissionAtom = atom<"edit" | "view">("edit");
 
 const getShareIcon = () => {
   const navigator = window.navigator as any;
@@ -67,6 +71,7 @@ const ActiveRoomDialog = ({
   const ref = useRef<HTMLInputElement>(null);
   const isShareSupported = "share" in navigator;
   const { onCopy, copyStatus } = useCopyStatus();
+  const [collabPermission, setCollabPermission] = useAtom(collabPermissionAtom);
 
   const copyRoomLink = async () => {
     try {
@@ -141,6 +146,38 @@ const ActiveRoomDialog = ({
           }}
         />
       </div>
+      <div className="ShareDialog__active__permissionRow">
+        <label className="ShareDialog__active__permissionLabel">
+          Participants can:
+        </label>
+        <div className="ShareDialog__active__permissionToggle">
+          <button
+            className={`ShareDialog__active__permissionBtn${collabPermission === "edit" ? " ShareDialog__active__permissionBtn--active" : ""}`}
+            onClick={() => {
+              setCollabPermission("edit");
+              const dashboardId = localStorage.getItem("dashboard-diagram-id");
+              if (dashboardId) {
+                updateDiagramMeta(dashboardId, { collabPermission: "edit" }).catch(() => {});
+              }
+            }}
+          >
+            Edit
+          </button>
+          <button
+            className={`ShareDialog__active__permissionBtn${collabPermission === "view" ? " ShareDialog__active__permissionBtn--active" : ""}`}
+            onClick={() => {
+              setCollabPermission("view");
+              const dashboardId = localStorage.getItem("dashboard-diagram-id");
+              if (dashboardId) {
+                updateDiagramMeta(dashboardId, { collabPermission: "view" }).catch(() => {});
+              }
+            }}
+          >
+            View only
+          </button>
+        </div>
+      </div>
+
       <div className="ShareDialog__active__description">
         <p>
           <span
@@ -177,6 +214,7 @@ const ActiveRoomDialog = ({
 
 const ShareDialogPicker = (props: ShareDialogProps) => {
   const { t } = useI18n();
+  const [collabPermission, setCollabPermission] = useAtom(collabPermissionAtom);
 
   const { collabAPI } = props;
 
@@ -191,6 +229,26 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
         {t("roomDialog.desc_privacy")}
       </div>
 
+      <div className="ShareDialog__active__permissionRow">
+        <label className="ShareDialog__active__permissionLabel">
+          Participants can:
+        </label>
+        <div className="ShareDialog__active__permissionToggle">
+          <button
+            className={`ShareDialog__active__permissionBtn${collabPermission === "edit" ? " ShareDialog__active__permissionBtn--active" : ""}`}
+            onClick={() => setCollabPermission("edit")}
+          >
+            Edit
+          </button>
+          <button
+            className={`ShareDialog__active__permissionBtn${collabPermission === "view" ? " ShareDialog__active__permissionBtn--active" : ""}`}
+            onClick={() => setCollabPermission("view")}
+          >
+            View only
+          </button>
+        </div>
+      </div>
+
       <div className="ShareDialog__picker__button">
         <FilledButton
           size="large"
@@ -198,7 +256,7 @@ const ShareDialogPicker = (props: ShareDialogProps) => {
           icon={playerPlayIcon}
           onClick={() => {
             trackEvent("share", "room creation", `ui (${getFrame()})`);
-            collabAPI.startCollaboration(null);
+            collabAPI.startCollaboration(null, collabPermission);
           }}
         />
       </div>

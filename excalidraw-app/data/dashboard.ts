@@ -19,6 +19,7 @@ export interface DiagramSummary {
   ownerId: string | null;
   visibility: "public" | "private";
   collabLink: string | null;
+  collabPermission: "edit" | "view";
   createdAt: string;
   updatedAt: string;
 }
@@ -191,7 +192,7 @@ export async function deleteProject(name: string): Promise<void> {
 
 export async function updateDiagramMeta(
   id: string,
-  meta: { title?: string; project?: string; tags?: string[]; pinned?: boolean; collabLink?: string | null },
+  meta: { title?: string; project?: string; tags?: string[]; pinned?: boolean; collabLink?: string | null; collabPermission?: "edit" | "view" },
 ): Promise<void> {
   const res = await authFetch(`${DASHBOARD_API}/diagrams/${id}/meta`, {
     method: "PUT",

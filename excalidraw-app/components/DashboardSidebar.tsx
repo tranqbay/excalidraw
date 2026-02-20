@@ -709,6 +709,10 @@ function useLoadDiagram(
               if (roomData) {
                 window.history.pushState({}, "", diagram.collabLink);
                 collabAPI.startCollaboration(roomData);
+                // Enforce view-only mode for joiners if owner set permission to 'view'
+                if (diagram.collabPermission === "view") {
+                  onReadOnlyDiagram?.(diagram.id, "read");
+                }
               }
             }
           }

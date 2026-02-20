@@ -671,10 +671,18 @@ function useLoadDiagram(
         }
 
         const currentOpenSidebar = excalidrawAPI.getAppState().openSidebar;
+        // Strip viewModeEnabled/zenModeEnabled from restored state —
+        // these are controlled via props, and spreading defaults here
+        // would override the prop-driven state set by onReadOnlyDiagram.
+        const {
+          viewModeEnabled: _vm,
+          zenModeEnabled: _zm,
+          ...safeAppState
+        } = (restored.appState || {}) as any;
         excalidrawAPI.updateScene({
           elements: restored.elements,
           appState: {
-            ...restored.appState,
+            ...safeAppState,
             name: diagram.title || "Untitled",
             openSidebar: currentOpenSidebar,
           },

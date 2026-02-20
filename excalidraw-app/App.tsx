@@ -482,7 +482,16 @@ const ExcalidrawWrapper = () => {
     setIsViewMode(true);
     setDashboardSaveStatus("readonly");
     debouncedDashboardSave.cancel();
-  }, [debouncedDashboardSave]);
+    // Belt-and-suspenders: imperatively set viewModeEnabled on the Excalidraw
+    // internal state. The prop alone can be overridden by updateScene calls
+    // that spread restored appState (which defaults viewModeEnabled to false).
+    if (excalidrawAPI) {
+      excalidrawAPI.updateScene({
+        appState: { viewModeEnabled: true },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
+    }
+  }, [debouncedDashboardSave, excalidrawAPI]);
 
   // Fork: create a copy of the current read-only diagram as the user's own
   const handleForkDiagram = useCallback(() => {

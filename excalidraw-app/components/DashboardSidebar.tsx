@@ -1575,7 +1575,6 @@ export const DashboardSidebar: React.FC<{
   dashboardSaveStatus?: DashboardSaveStatus;
   auth?: AuthState;
   collabAPI?: CollabAPI | null;
-  onLogout?: () => void;
   onForkDiagram?: () => void;
   onReadOnlyDiagram?: (diagramId: string, permission: string) => void;
 }> = ({
@@ -1586,7 +1585,6 @@ export const DashboardSidebar: React.FC<{
   dashboardSaveStatus = "idle",
   auth,
   collabAPI,
-  onLogout,
   onForkDiagram,
   onReadOnlyDiagram,
 }) => {
@@ -1666,19 +1664,6 @@ export const DashboardSidebar: React.FC<{
           >
             + New
           </button>
-          {/* Auth status */}
-          {isAuthenticated && (
-            <div className="dashboard-auth-row">
-              <div className="dashboard-user-info">
-                <span className="dashboard-user-info__email" title={auth?.email || undefined}>
-                  {auth?.email || "Logged in"}
-                </span>
-                <button className="dashboard-user-info__logout" onClick={onLogout}>
-                  Log out
-                </button>
-              </div>
-            </div>
-          )}
           <Sidebar.TabTriggers>
             <Sidebar.TabTrigger tab={DASHBOARD_TAB_ALL}>
               All

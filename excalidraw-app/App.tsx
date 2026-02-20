@@ -1107,6 +1107,9 @@ const ExcalidrawWrapper = () => {
                   <span className="top-right-user__email" title={authState.email || undefined}>
                     {authState.email || "Logged in"}
                   </span>
+                  <button className="top-right-user__logout" onClick={handleLogout}>
+                    Log out
+                  </button>
                 </div>
               )}
             </div>
@@ -1190,7 +1193,6 @@ const ExcalidrawWrapper = () => {
             dashboardSaveStatus={dashboardSaveStatus}
             auth={authState}
             collabAPI={collabAPI}
-            onLogout={handleLogout}
             onForkDiagram={handleForkDiagram}
             onReadOnlyDiagram={handleReadOnlyDiagram}
           />

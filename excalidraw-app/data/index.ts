@@ -9,6 +9,7 @@ import {
 } from "@excalidraw/excalidraw/data/encryption";
 import { serializeAsJSON } from "@excalidraw/excalidraw/data/json";
 import { restore } from "@excalidraw/excalidraw/data/restore";
+import { convertToExcalidrawElements } from "@excalidraw/excalidraw/data/transform";
 import type { ImportedDataState } from "@excalidraw/excalidraw/data/types";
 import type { SceneBounds } from "@excalidraw/excalidraw/element/bounds";
 import { isInvisiblySmallElement } from "@excalidraw/excalidraw/element/sizeHelpers";
@@ -250,8 +251,36 @@ export const loadScene = async (
   if (id != null && privateKey != null) {
     // the private key is used to decrypt the content from the server, take
     // extra care not to leak it
+    const imported = await importFromBackend(id, privateKey);
+
+    // Convert shorthand elements (e.g. `label` on shapes) to native
+    // Excalidraw format so diagrams exported by excalidraw-mcp render
+    // text correctly.
+    if (imported.elements && Array.isArray(imported.elements)) {
+      const hasLabels = imported.elements.some(
+        (el: any) => el.label && typeof el.label === "object",
+      );
+      if (hasLabels) {
+        imported.elements = convertToExcalidrawElements(
+          imported.elements.map((el: any) =>
+            el.label
+              ? {
+                  ...el,
+                  label: {
+                    textAlign: "center",
+                    verticalAlign: "middle",
+                    ...el.label,
+                  },
+                }
+              : el,
+          ),
+          { regenerateIds: false },
+        ) as any;
+      }
+    }
+
     data = restore(
-      await importFromBackend(id, privateKey),
+      imported,
       localDataState?.appState,
       localDataState?.elements,
       { repairBindings: true, refreshDimensions: false },
